@@ -9,6 +9,28 @@ from argsort import argsort
 
 
 # yapf: disable
+@triton.autotune(
+    configs=[
+        triton.Config({'BLOCK_SIZE_M': 128,  'BLOCK_SIZE_K': 64,}, num_stages=3, num_warps=8),
+        triton.Config({'BLOCK_SIZE_M': 128,  'BLOCK_SIZE_K': 32,}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_K': 64,}, num_stages=3, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_K': 32,}, num_stages=2, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64,  'BLOCK_SIZE_K': 32,}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_K': 32,}, num_stages=5, num_warps=2),
+        triton.Config({'BLOCK_SIZE_M': 64,  'BLOCK_SIZE_K': 64,}, num_stages=4, num_warps=4),
+        triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_K': 32,}, num_stages=5, num_warps=2),
+        # Good config for fp8 inputs.
+        # triton.Config({'BLOCK_SIZE_M': 128,  'BLOCK_SIZE_K': 128,}, num_stages=3, num_warps=8),
+        # triton.Config({'BLOCK_SIZE_M': 256,  'BLOCK_SIZE_K': 128,}, num_stages=3, num_warps=8),
+        # triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_K': 128,}, num_stages=4, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 64,  'BLOCK_SIZE_K': 128,}, num_stages=4, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 128,  'BLOCK_SIZE_K': 128,}, num_stages=4, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_K': 64,}, num_stages=4, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 64,  'BLOCK_SIZE_K': 64,}, num_stages=4, num_warps=4),
+        # triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_K': 64,}, num_stages=4, num_warps=4),
+    ],
+    key=['M', 'N', 'K'],
+)
 @triton.jit
 def renormalize_route(
         # Pointers to matrices
@@ -79,7 +101,7 @@ def renormalize_route(
     x_max = tl.max(topk_sort, 1)  # [BLOCK_SIZE_M, ]
     safe_exp = tl.exp(topk_sort-x_max[:, None])
     safe_exp_sum = tl.sum(safe_exp, 1)
-    c = safe_exp / safe_exp_sum[:, None]
+    c = safe_exp / safe_exp_sum[:, None]  # TODO try fast math div
 
     # -----------------------------------------------------------
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
@@ -100,7 +122,7 @@ def renormalize_route(
 def fused_route(hidden_state: torch.Tensor,
                 gate: torch.Tensor,
                 topk: int,
-                topk_weight: torch.Tensor,
+                topk_weights: torch.Tensor,
                 topk_ids: torch.Tensor,
                 renormalize=True,
             ):
@@ -110,30 +132,41 @@ def fused_route(hidden_state: torch.Tensor,
     KK, N = gate.shape         # e.g. 4096, 8
     assert KK == K, f'{KK}, {K}'
     assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
-    assert N >= 16, f'{N} number of experts needs to larger than 16 for now; padding is requrired otherwise'
+
+    # tl.dot doesn't support tile size < 16
+    if N < 16:
+        diff = 16 - N
+        padd_gate = torch.cat([gate, torch.zeros((KK, diff), dtype=gate.dtype)], 1)
+    else:
+        padd_gate = gate
 
     config = {
-        'BLOCK_SIZE_M': 16,  # TODO autotune
-        'BLOCK_SIZE_K': 32,  # TODO autotune
-        'BLOCK_SIZE_N': N,   # entire col fit in
+        # 'BLOCK_SIZE_M': 16,
+        # 'BLOCK_SIZE_K': 32,
+        'BLOCK_SIZE_N': max(N, 16),   # entire col fit in
         'TOPK': topk,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
     renormalize_route[grid](
-        hidden_state, gate, topk_weight, topk_ids,
+        hidden_state, padd_gate, topk_weights, topk_ids,
         M, N, K,
         hidden_state.stride(0), hidden_state.stride(1),
-        gate.stride(0), gate.stride(1),
-        topk_weight.stride(0), topk_weight.stride(1),
+        padd_gate.stride(0), padd_gate.stride(1),
+        topk_weights.stride(0), topk_weights.stride(1),
         **config,
     )
 
-    print('fused_route:')
-    print(topk_weight)
-    print(topk_ids)
-    print(topk_weight.shape, topk_ids.shape)
-    print()
-    print()
+    # tl cannot directly write to ptr with incompetible shape
+    topk_weights = topk_weights[:, :topk]
+    topk_ids = topk_ids[:, :topk]
+
+
+    # print('fused_route:')
+    # print(topk_weight)
+    # print(topk_ids)
+    # print(topk_weight.shape, topk_ids.shape)
+    # print()
+    # print()
 
 
 

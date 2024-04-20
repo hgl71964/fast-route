@@ -331,9 +331,6 @@ def fused_moe(hidden_states: torch.Tensor,
 
     fused_route(hidden_states, gate, topk, topk_weights, topk_ids, renormalize)
 
-    topk_weights = topk_weights[:, :topk]
-    topk_ids = topk_ids[:, :topk]
-
     assert torch.allclose(tmp_topk_weights, topk_weights, atol=1e-2)
     assert torch.allclose(
         tmp_topk_ids,
