@@ -12,8 +12,6 @@ import triton.language as tl
 from vllm._C import ops
 import vllm._moe_C as moe_kernels
 
-from torch.profiler import record_function, ProfilerActivity
-
 from fused_route import fused_route
 
 
@@ -142,7 +140,7 @@ def fused_moe_kernel(
 
 def moe_align_block_size(
         topk_ids: torch.Tensor, block_size: int,
-        num_experts: int) -> (torch.Tensor, torch.Tensor, torch.Tensor):
+        num_experts: int):
     """
     Aligns the token distribution across experts to be compatible with block size for matrix multiplication.
 
@@ -303,65 +301,50 @@ def fused_moe(hidden_states: torch.Tensor,
                                       device=hidden_states.device,
                                       dtype=hidden_states.dtype)
 
-    # with torch.profiler(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
-    with torch.profiler.profile(record_shapes=True) as prof:
+    # vanilla
+    ## shape: [m, e]
+    score = hidden_states @ gate
+    score = torch.softmax(score, dim=-1)
+    tmp_topk_weights, tmp_topk_ids = torch.topk(score, topk)
+    if renormalize:
+        tmp_topk_weights = tmp_topk_weights / tmp_topk_weights.sum(
+            dim=-1, keepdim=True)
+    print(tmp_topk_weights, tmp_topk_ids)
 
-        with record_function("route"):
+    # vllm: GEMM + fused softmax + topk
+    gating_output = hidden_states @ gate
+    moe_kernels.topk_softmax(
+        vllm_topk_weights,
+        vllm_topk_ids,
+        vllm_token_expert_indicies,
+        gating_output.float(),  # TODO(woosuk): Optimize this.
+    )
+    del vllm_token_expert_indicies  # Not used. Will be used in the future.
+    if renormalize:
+        vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(
+            dim=-1, keepdim=True)
+    print('vllm: ', vllm_topk_weights, vllm_topk_ids)
 
-            # vanilla
-            ## shape: [m, e]
-            score = hidden_states @ gate
-            score = torch.softmax(score, dim=-1)
-            tmp_topk_weights, tmp_topk_ids = torch.topk(score, topk)
-            if renormalize:
-                tmp_topk_weights = tmp_topk_weights / tmp_topk_weights.sum(
-                    dim=-1, keepdim=True)
-            print(tmp_topk_weights, tmp_topk_ids)
+    # fused routing
+    fused_route(hidden_states, gate, topk, topk_weights, topk_ids,
+                renormalize)
+    print('fused route: ', topk_weights, topk_ids)
 
-            # vllm: GEMM + fused softmax + topk
-            gating_output = hidden_states @ gate
-            moe_kernels.topk_softmax(
-                vllm_topk_weights,
-                vllm_topk_ids,
-                vllm_token_expert_indicies,
-                gating_output.float(),  # TODO(woosuk): Optimize this.
-            )
-            del vllm_token_expert_indicies  # Not used. Will be used in the future.
-            if renormalize:
-                vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(
-                    dim=-1, keepdim=True)
-            print('vllm: ', vllm_topk_weights, vllm_topk_ids)
+    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+        topk_ids, config['BLOCK_SIZE_M'], E)
 
-            # fused routing
-            fused_route(hidden_states, gate, topk, topk_weights, topk_ids,
-                        renormalize)
-            print('fused route: ', topk_weights, topk_ids)
+    invoke_fused_moe_kernel(hidden_states, w1, intermediate_cache1,
+                            topk_weights, topk_ids, sorted_token_ids,
+                            expert_ids, num_tokens_post_padded, False,
+                            topk_ids.shape[1], config)
 
-        with record_function("moe_align_block_size"):
-            sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-                topk_ids, config['BLOCK_SIZE_M'], E)
+    ops.silu_and_mul(intermediate_cache2,
+                        intermediate_cache1.view(-1, N))
 
-        with record_function("fused_moe_1"):
-            invoke_fused_moe_kernel(hidden_states, w1, intermediate_cache1,
-                                    topk_weights, topk_ids, sorted_token_ids,
-                                    expert_ids, num_tokens_post_padded, False,
-                                    topk_ids.shape[1], config)
-
-        with record_function("silu_and_mul"):
-            ops.silu_and_mul(intermediate_cache2,
-                             intermediate_cache1.view(-1, N))
-
-        with record_function("fused_moe_2"):
-            invoke_fused_moe_kernel(intermediate_cache2, w2,
-                                    intermediate_cache3, topk_weights,
-                                    topk_ids, sorted_token_ids, expert_ids,
-                                    num_tokens_post_padded, True, 1, config)
-
-    # log
-    if save:
-        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                 f"route_perf.json")
-        prof.export_chrome_trace(save_path)
+    invoke_fused_moe_kernel(intermediate_cache2, w2,
+                            intermediate_cache3, topk_weights,
+                            topk_ids, sorted_token_ids, expert_ids,
+                            num_tokens_post_padded, True, 1, config)
 
     if inplace:
         return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),

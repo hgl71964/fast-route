@@ -60,7 +60,6 @@ def renormalize_route(
         # Meta-parameters
         TOPK: tl.constexpr,
         BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,  #
-        GROUP_SIZE_M: tl.constexpr,  #
 ):
     pid_m = tl.program_id(axis=0)
 
@@ -132,7 +131,8 @@ def fused_route(hidden_state: torch.Tensor,
 
     config = {
         'BLOCK_SIZE_M': 16,  # TODO autotune
-        'BLOCK_SIZE_N': N,
+        'BLOCK_SIZE_K': 32,  # TODO autotune
+        'BLOCK_SIZE_N': N,   # entire col fit in
     }
 
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
