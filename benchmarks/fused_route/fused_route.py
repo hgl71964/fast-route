@@ -10,7 +10,7 @@ from argsort import argsort
 
 # yapf: disable
 @triton.jit
-def matmul_kernel(
+def renormalize_route(
         # Pointers to matrices
         a_ptr, b_ptr, c_ptr, d_ptr,
         # Matrix dimensions
@@ -94,78 +94,6 @@ def matmul_kernel(
     tl.store(d_ptrs, sort_ids, mask=c_mask)
 
 
-@triton.jit
-def renormalize_route(
-        # Pointers to matrices
-        a_ptr, b_ptr, topk_weight_ptr, topk_ids_ptr,
-        # Matrix dimensions
-        M, N, K,
-        # The stride
-        stride_am, stride_ak,  #
-        stride_bk, stride_bn,  #
-        stride_cm, stride_cn,
-        # Meta-parameters
-        TOPK: tl.constexpr,
-        BLOCK_SIZE_M: tl.constexpr, BLOCK_SIZE_N: tl.constexpr, BLOCK_SIZE_K: tl.constexpr,  #
-):
-    pid_m = tl.program_id(axis=0)
-
-    # `a_ptrs` is a block of [BLOCK_SIZE_M, BLOCK_SIZE_K] pointers
-    # `b_ptrs` is a block of [BLOCK_SIZE_K, BLOCK_SIZE_N] pointers
-    # offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
-    offs_am = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    offs_bn = tl.arange(0, BLOCK_SIZE_N)  # entire col fit in
-    offs_k = tl.arange(0, BLOCK_SIZE_K)
-
-    a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
-    b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
-
-    # main loop
-    accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-    for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-        # Load the next block of A and B, generate a mask by checking the K dimension.
-        # If it is out of bounds, set it to 0.
-        a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
-        b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
-        # We accumulate along the K dimension.
-        accumulator = tl.dot(a, b, accumulator)
-        # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak
-        b_ptrs += BLOCK_SIZE_K * stride_bk
-    accumulator = accumulator.to(tl.float16)
-
-    # topk/sort
-    # ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    # sort, sort_ids = argsort(accumulator, ids, 1, True)
-
-    # # persistent softmax
-    # mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
-    # mask = tl.broadcast_to(mask[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-
-    # topk_sort = tl.where(mask, sort, -float('inf'))
-    # x_max = tl.max(topk_sort, 1)  # [BLOCK_SIZE_M, ]
-
-    # safe_exp = tl.exp(topk_sort-x_max[:, None])
-    # safe_exp_sum = tl.sum(safe_exp, 1)
-
-    # # ret = safe_exp / safe_exp_sum[:, None]
-    # ret = fdiv(safe_exp, safe_exp_sum)
-
-    # -----------------------------------------------------------
-    off_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    # off_n = tl.arange(0, TOPK)
-    off_n = tl.arange(0, BLOCK_SIZE_N)
-
-    topk_weight_ptrs = topk_weight_ptr + (stride_cm * off_m[:, None] + stride_cn * off_n[None, :])
-    topk_ids_ptrs = topk_ids_ptr + (stride_cm * off_m[:, None] + stride_cn * off_n[None, :])
-
-    # c_mask = (off_m[:, None] < M) & (off_n[None, :] < TOPK)
-    c_mask = (off_m[:, None] < M) & (off_n[None, :] < off_n)
-    tl.store(topk_weight_ptrs, ret, mask=c_mask)
-
-    # tl.store(topk_ids_ptrs, sort_ids, mask=c_mask)
-    # tl.store(topk_ids_ptrs, ids, mask=c_mask)
-
 
 def fused_route(hidden_state: torch.Tensor,
                 gate: torch.Tensor,
@@ -180,6 +108,7 @@ def fused_route(hidden_state: torch.Tensor,
     KK, N = gate.shape         # e.g. 4096, 8
     assert KK == K, f'{KK}, {K}'
     assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
+    assert N >= 16, f'{N} number of experts needs to larger than 16 for now; padding is requrired otherwise'
 
     config = {
         'BLOCK_SIZE_M': 16,  # TODO autotune
@@ -188,7 +117,7 @@ def fused_route(hidden_state: torch.Tensor,
         'TOPK': topk,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
-    matmul_kernel[grid](
+    renormalize_route[grid](
         hidden_state, gate, topk_weight, topk_ids,
         M, N, K,
         hidden_state.stride(0), hidden_state.stride(1),
@@ -197,9 +126,11 @@ def fused_route(hidden_state: torch.Tensor,
         **config,
     )
 
-    print('after:')
+    print('fused_route:')
     print(topk_weight)
     print(topk_ids)
+    print(topk_weight.shape, topk_ids.shape)
+    print()
     print()
 
 

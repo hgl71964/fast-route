@@ -40,5 +40,6 @@ if __name__ == '__main__':
     n = 14336 // 2
     k = 4096
     e = 16
+    # e = 8
     topk = 2
     run_moe(m, n, k, e, topk, torch.float16)

@@ -114,7 +114,8 @@ def sort_kerenl(
     x = tl.load(x_ptrs)
     ids = tl.broadcast_to(tl.arange(0, BLOCK_N)[None, :], (BLOCK_M, BLOCK_N))
 
-    o, ids = argsort(x, ids, 1, True)
+    # o, ids = argsort(x, ids, 1, True)
+    o, ids = argsort(x, ids, 1, False)
 
     o_ptrs = o_ptr + m_offset + (tl.arange(0, BLOCK_M)[:, None] * stride_m +
                                  k_off[None, :])
@@ -170,7 +171,8 @@ if __name__ == '__main__':
     print('ids: ')
     print(ids)
 
-    ref_o, ref_ids = torch.sort(x, 1, True)
+    # ref_o, ref_ids = torch.sort(x, 1, True)
+    ref_o, ref_ids = torch.sort(x, 1, False)
     print('ref: ')
     print(ref_o)
     print(ref_ids)

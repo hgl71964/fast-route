@@ -290,10 +290,15 @@ def fused_moe(hidden_states: torch.Tensor,
     if renormalize:
         tmp_topk_weights = tmp_topk_weights / tmp_topk_weights.sum(
             dim=-1, keepdim=True)
+
+    print('ref: ')
     print(tmp_topk_weights, tmp_topk_ids)
-    print(tmp_topk_weights.dtype, tmp_topk_ids.dtype)
+    print(tmp_topk_weights.dtype, tmp_topk_ids.dtype, tmp_topk_weights.shape,
+          tmp_topk_ids.shape)
     # print(score)
-    print(norm)
+    # print(norm)
+    print()
+    print()
 
     # vllm: GEMM + fused softmax + topk
     # gating_output = hidden_states @ gate
