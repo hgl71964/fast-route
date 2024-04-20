@@ -330,16 +330,21 @@ def fused_moe(hidden_states: torch.Tensor,
         device=hidden_states.device)
 
     # tl.dot doesn't support tile size < 16; but gate can be padded statically
-    K, N = gate.shape
-    if N < 16:
-        diff = 16 - N
+    K, E = gate.shape
+    if E < 16:
+        diff = 16 - E
         padd_gate = torch.cat(
             [gate, torch.zeros((K, diff), dtype=gate.dtype)], 1)
     else:
         padd_gate = gate
 
-    fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
-                renormalize)
+    # print(id(topk_weights), id(topk_ids))
+
+    topk_weights, topk_ids = fused_route(hidden_states, padd_gate, topk,
+                                         topk_weights, topk_ids, renormalize)
+
+    # print(topk_weights.shape, topk_ids.shape)
+    # print(id(topk_weights), id(topk_ids))
 
     assert torch.allclose(tmp_topk_weights, topk_weights, atol=1e-2)
     assert torch.allclose(

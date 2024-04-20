@@ -132,11 +132,12 @@ def fused_route(hidden_state: torch.Tensor,
     KK, N = gate.shape         # e.g. 4096, 8
     assert KK == K, f'{KK}, {K}'
     assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
+    assert N >= 16, f'{N} number of experts must be > 16'
 
     config = {
         # 'BLOCK_SIZE_M': 16,
         # 'BLOCK_SIZE_K': 32,
-        'BLOCK_SIZE_N': max(N, 16),   # entire col fit in
+        'BLOCK_SIZE_N': N,   # entire col fit in
         'TOPK': topk,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
@@ -155,11 +156,12 @@ def fused_route(hidden_state: torch.Tensor,
 
 
     # print('fused_route:')
-    # print(topk_weight)
+    # print(topk_weights)
     # print(topk_ids)
-    # print(topk_weight.shape, topk_ids.shape)
+    # print(topk_weights.shape, topk_ids.shape)
     # print()
     # print()
+    return topk_weights, topk_ids
 
 
 
