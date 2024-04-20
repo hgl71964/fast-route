@@ -262,7 +262,7 @@ def fused_moe(hidden_states: torch.Tensor,
     }
 
     # if topk_ids.numel() <= w1.shape[0]:
-    if M*topk <= w1.shape[0]:
+    if M * topk <= w1.shape[0]:
         config = {
             'BLOCK_SIZE_M': 16,
             'BLOCK_SIZE_N': 32,
@@ -270,21 +270,20 @@ def fused_moe(hidden_states: torch.Tensor,
             'GROUP_SIZE_M': 1
         }
 
-
     # route parameter
     vllm_topk_weights = torch.empty(M,
-                               topk,
-                               dtype=torch.float32,
-                               device=hidden_states.device)
+                                    topk,
+                                    dtype=torch.float32,
+                                    device=hidden_states.device)
     vllm_topk_ids = torch.empty(M,
-                           topk,
-                           dtype=torch.int32,
-                           device=hidden_states.device)
+                                topk,
+                                dtype=torch.int32,
+                                device=hidden_states.device)
     vllm_token_expert_indicies = torch.empty(M,
-                                        topk,
-                                        dtype=torch.int32,
-                                        device=hidden_states.device)
-    
+                                             topk,
+                                             dtype=torch.int32,
+                                             device=hidden_states.device)
+
     topk_weights = torch.empty(M,
                                topk,
                                dtype=torch.float32,
@@ -329,12 +328,13 @@ def fused_moe(hidden_states: torch.Tensor,
             )
             del vllm_token_expert_indicies  # Not used. Will be used in the future.
             if renormalize:
-                vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(dim=-1,
-                                                               keepdim=True)
+                vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(
+                    dim=-1, keepdim=True)
             print('vllm: ', vllm_topk_weights, vllm_topk_ids)
 
             # fused routing
-            fused_route(hidden_states, gate, topk, topk_weights, topk_ids, renormalize)
+            fused_route(hidden_states, gate, topk, topk_weights, topk_ids,
+                        renormalize)
             print('fused route: ', topk_weights, topk_ids)
 
         with record_function("moe_align_block_size"):
