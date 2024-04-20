@@ -281,38 +281,19 @@ def fused_moe(hidden_states: torch.Tensor,
                                              dtype=torch.int32,
                                              device=hidden_states.device)
 
-    topk_weights = torch.empty(
-        M,
-        # topk,
-        E,
-        dtype=torch.float32,
-        device=hidden_states.device)
-    topk_ids = torch.empty(
-        M,
-        # topk,
-        E,
-        dtype=torch.int32,
-        device=hidden_states.device)
-
-    intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
-    intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N // 2),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
-    intermediate_cache3 = torch.empty((M, topk_ids.shape[1], w2.shape[1]),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
-
     # vanilla
     ## shape: [m, e]
     score = hidden_states @ gate
-    score = torch.softmax(score, dim=-1)
-    tmp_topk_weights, tmp_topk_ids = torch.topk(score, topk)
+    norm = torch.softmax(score, dim=-1)
+    tmp_topk_weights, tmp_topk_ids = torch.topk(norm, topk)
+    tmp_topk_ids = tmp_topk_ids.to(torch.int32)
     if renormalize:
         tmp_topk_weights = tmp_topk_weights / tmp_topk_weights.sum(
             dim=-1, keepdim=True)
     print(tmp_topk_weights, tmp_topk_ids)
+    print(tmp_topk_weights.dtype, tmp_topk_ids.dtype)
+    # print(score)
+    print(norm)
 
     # vllm: GEMM + fused softmax + topk
     # gating_output = hidden_states @ gate
@@ -329,8 +310,47 @@ def fused_moe(hidden_states: torch.Tensor,
     # print('vllm: ', vllm_topk_weights, vllm_topk_ids)
 
     # fused routing
+    topk_weights = torch.empty(
+        M,
+        # topk,
+        E,
+        # dtype=torch.float32,
+        dtype=torch.float16,
+        device=hidden_states.device)
+    topk_ids = torch.empty(
+        M,
+        # topk,
+        E,
+        dtype=torch.int32,
+        device=hidden_states.device)
+
     fused_route(hidden_states, gate, topk, topk_weights, topk_ids, renormalize)
-    print('fused route: ', topk_weights, topk_ids)
+
+    topk_weights = topk_weights[:, :topk]
+    topk_ids = topk_ids[:, :topk]
+
+    assert torch.allclose(tmp_topk_weights, topk_weights, atol=1e-2)
+    assert torch.allclose(
+        tmp_topk_ids,
+        topk_ids,
+    )
+    print('OK')
+    # print('fused route: ', topk_weights, topk_ids)
+
+    #
+    #
+    #
+    #
+    # fused moe op
+    intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
+                                      device=hidden_states.device,
+                                      dtype=hidden_states.dtype)
+    intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N // 2),
+                                      device=hidden_states.device,
+                                      dtype=hidden_states.dtype)
+    intermediate_cache3 = torch.empty((M, topk_ids.shape[1], w2.shape[1]),
+                                      device=hidden_states.device,
+                                      dtype=hidden_states.dtype)
 
     sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
         topk_ids, config['BLOCK_SIZE_M'], E)
