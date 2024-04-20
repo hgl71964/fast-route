@@ -138,9 +138,8 @@ def fused_moe_kernel(
     tl.store(c_ptrs, accumulator, mask=c_mask)
 
 
-def moe_align_block_size(
-        topk_ids: torch.Tensor, block_size: int,
-        num_experts: int):
+def moe_align_block_size(topk_ids: torch.Tensor, block_size: int,
+                         num_experts: int):
     """
     Aligns the token distribution across experts to be compatible with block size for matrix multiplication.
 
@@ -282,14 +281,18 @@ def fused_moe(hidden_states: torch.Tensor,
                                              dtype=torch.int32,
                                              device=hidden_states.device)
 
-    topk_weights = torch.empty(M,
-                               topk,
-                               dtype=torch.float32,
-                               device=hidden_states.device)
-    topk_ids = torch.empty(M,
-                           topk,
-                           dtype=torch.int32,
-                           device=hidden_states.device)
+    topk_weights = torch.empty(
+        M,
+        # topk,
+        E,
+        dtype=torch.float32,
+        device=hidden_states.device)
+    topk_ids = torch.empty(
+        M,
+        # topk,
+        E,
+        dtype=torch.int32,
+        device=hidden_states.device)
 
     intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
                                       device=hidden_states.device,
@@ -312,22 +315,21 @@ def fused_moe(hidden_states: torch.Tensor,
     print(tmp_topk_weights, tmp_topk_ids)
 
     # vllm: GEMM + fused softmax + topk
-    gating_output = hidden_states @ gate
-    moe_kernels.topk_softmax(
-        vllm_topk_weights,
-        vllm_topk_ids,
-        vllm_token_expert_indicies,
-        gating_output.float(),  # TODO(woosuk): Optimize this.
-    )
-    del vllm_token_expert_indicies  # Not used. Will be used in the future.
-    if renormalize:
-        vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(
-            dim=-1, keepdim=True)
-    print('vllm: ', vllm_topk_weights, vllm_topk_ids)
+    # gating_output = hidden_states @ gate
+    # moe_kernels.topk_softmax(
+    #     vllm_topk_weights,
+    #     vllm_topk_ids,
+    #     vllm_token_expert_indicies,
+    #     gating_output.float(),  # TODO(woosuk): Optimize this.
+    # )
+    # del vllm_token_expert_indicies  # Not used. Will be used in the future.
+    # if renormalize:
+    #     vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(
+    #         dim=-1, keepdim=True)
+    # print('vllm: ', vllm_topk_weights, vllm_topk_ids)
 
     # fused routing
-    fused_route(hidden_states, gate, topk, topk_weights, topk_ids,
-                renormalize)
+    fused_route(hidden_states, gate, topk, topk_weights, topk_ids, renormalize)
     print('fused route: ', topk_weights, topk_ids)
 
     sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
@@ -338,13 +340,12 @@ def fused_moe(hidden_states: torch.Tensor,
                             expert_ids, num_tokens_post_padded, False,
                             topk_ids.shape[1], config)
 
-    ops.silu_and_mul(intermediate_cache2,
-                        intermediate_cache1.view(-1, N))
+    ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-    invoke_fused_moe_kernel(intermediate_cache2, w2,
-                            intermediate_cache3, topk_weights,
-                            topk_ids, sorted_token_ids, expert_ids,
-                            num_tokens_post_padded, True, 1, config)
+    invoke_fused_moe_kernel(intermediate_cache2, w2, intermediate_cache3,
+                            topk_weights, topk_ids, sorted_token_ids,
+                            expert_ids, num_tokens_post_padded, True, 1,
+                            config)
 
     if inplace:
         return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),

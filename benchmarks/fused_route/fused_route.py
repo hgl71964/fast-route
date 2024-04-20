@@ -9,44 +9,6 @@ from argsort import argsort
 
 
 # yapf: disable
-# @triton.autotune(
-#     configs=[
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=3,
-#                       num_warps=8),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5,
-#                       num_warps=2),
-#         triton.Config({'BLOCK_SIZE_M': 32, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 32, 'GROUP_SIZE_M': 8}, num_stages=5,
-#                       num_warps=2),
-#         # Good config for fp8 inputs.
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 8}, num_stages=3,
-#                       num_warps=8),
-#         triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 8}, num_stages=3,
-#                       num_warps=8),
-#         triton.Config({'BLOCK_SIZE_M': 256, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 256, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 128, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 64, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 64, 'BLOCK_SIZE_N': 128, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#         triton.Config({'BLOCK_SIZE_M': 128, 'BLOCK_SIZE_N': 32, 'BLOCK_SIZE_K': 64, 'GROUP_SIZE_M': 8}, num_stages=4,
-#                       num_warps=4),
-#     ],
-#     key=['M', 'N', 'K'],
-# )
 @triton.jit
 def renormalize_route(
         # Pointers to matrices
@@ -73,7 +35,7 @@ def renormalize_route(
     a_ptrs = a_ptr + (offs_am[:, None] * stride_am + offs_k[None, :] * stride_ak)
     b_ptrs = b_ptr + (offs_k[:, None] * stride_bk + offs_bn[None, :] * stride_bn)
 
-    # `accumulator` will be converted back to fp16 after the loop.
+    # main loop
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
         # Load the next block of A and B, generate a mask by checking the K dimension.
@@ -85,7 +47,7 @@ def renormalize_route(
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
         b_ptrs += BLOCK_SIZE_K * stride_bk
-    accumulator = accumulator.to(tl.float16)
+    # accumulator = accumulator.to(tl.float16)
 
     # topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
@@ -93,7 +55,7 @@ def renormalize_route(
 
     # persistent softmax
     mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
-    mask = tl.broadcast_to(mask, (BLOCK_SIZE_M, BLOCK_SIZE_N))
+    mask = tl.broadcast_to(mask[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
 
     topk_sort = tl.where(mask, sort, -float('inf'))
     x_max = tl.max(topk_sort, 1)  # [BLOCK_SIZE_M, ]
@@ -106,13 +68,17 @@ def renormalize_route(
 
     # -----------------------------------------------------------
     off_m = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    off_n = tl.arange(0, TOPK)
+    # off_n = tl.arange(0, TOPK)
+    off_n = tl.arange(0, BLOCK_SIZE_N)
+
     topk_weight_ptrs = topk_weight_ptr + (stride_cm * off_m[:, None] + stride_cn * off_n[None, :])
     topk_ids_ptrs = topk_ids_ptr + (stride_cm * off_m[:, None] + stride_cn * off_n[None, :])
 
-    c_mask = (off_m[:, None] < M) & (off_n[None, :] < TOPK)
+    # c_mask = (off_m[:, None] < M) & (off_n[None, :] < TOPK)
+    c_mask = (off_m[:, None] < M) & (off_n[None, :] < off_n)
     tl.store(topk_weight_ptrs, ret, mask=c_mask)
-    tl.store(topk_ids_ptrs, sort_ids, mask=c_mask)
+    # tl.store(topk_ids_ptrs, sort_ids, mask=c_mask)
+    tl.store(topk_ids_ptrs, ids, mask=c_mask)
 
 
 def fused_route(hidden_state: torch.Tensor,
@@ -127,7 +93,7 @@ def fused_route(hidden_state: torch.Tensor,
     M, K = hidden_state.shape  # e.g. 512, 4096
     KK, N = gate.shape         # e.g. 4096, 8
     assert KK == K, f'{KK}, {K}'
-    assert N <= 64, f'{N} number of experts should be small enough to reside in shared memory'
+    assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
 
     config = {
         'BLOCK_SIZE_M': 16,  # TODO autotune
@@ -135,7 +101,18 @@ def fused_route(hidden_state: torch.Tensor,
         'BLOCK_SIZE_N': N,   # entire col fit in
     }
 
-    grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']) * triton.cdiv(N, META['BLOCK_SIZE_N']), )
+    print('start: ')
+    print(topk_weight.shape, topk_ids.shape)
+    print(topk_weight.stride(), topk_ids.stride())
+    print(topk_weight.dtype, topk_ids.dtype)
+
+    print(hidden_state.shape, gate.shape)
+    print(hidden_state.stride(), gate.stride())
+    print(hidden_state.dtype, gate.dtype)
+
+    print()
+
+    grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
     renormalize_route[grid](
         hidden_state, gate, topk_weight, topk_ids,
         M, N, K,
@@ -145,6 +122,18 @@ def fused_route(hidden_state: torch.Tensor,
         topk,
         **config,
     )
+
+    print('after:')
+    print(topk_weight.shape, topk_ids.shape)
+    print(topk_weight.stride(), topk_ids.stride())
+    print(topk_weight.dtype, topk_ids.dtype)
+
+    print(topk_weight)
+    print(topk_ids)
+    print()
+
+    topk_weight = topk_weight[:, :topk]
+    topk_ids = topk_ids[:, :topk]
 
 
 def f():
