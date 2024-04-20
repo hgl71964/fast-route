@@ -133,13 +133,6 @@ def fused_route(hidden_state: torch.Tensor,
     assert KK == K, f'{KK}, {K}'
     assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
 
-    # tl.dot doesn't support tile size < 16
-    if N < 16:
-        diff = 16 - N
-        padd_gate = torch.cat([gate, torch.zeros((KK, diff), dtype=gate.dtype)], 1)
-    else:
-        padd_gate = gate
-
     config = {
         # 'BLOCK_SIZE_M': 16,
         # 'BLOCK_SIZE_K': 32,
@@ -148,10 +141,10 @@ def fused_route(hidden_state: torch.Tensor,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
     renormalize_route[grid](
-        hidden_state, padd_gate, topk_weights, topk_ids,
+        hidden_state, gate, topk_weights, topk_ids,
         M, N, K,
         hidden_state.stride(0), hidden_state.stride(1),
-        padd_gate.stride(0), padd_gate.stride(1),
+        gate.stride(0), gate.stride(1),
         topk_weights.stride(0), topk_weights.stride(1),
         **config,
     )
