@@ -12,10 +12,6 @@ import triton.language as tl
 from vllm._C import ops
 import vllm._moe_C as moe_kernels
 
-from fused_route import fused_route
-
-from torch.profiler import profile, record_function, ProfilerActivity
-
 
 @triton.jit
 def fused_moe_kernel(
@@ -270,101 +266,31 @@ def fused_moe(hidden_states: torch.Tensor,
         }
 
     # NOTE: statically allocate route parameter
-    vllm_topk_weights = torch.empty(M,
-                                    topk,
-                                    dtype=torch.float32,
-                                    device=hidden_states.device)
-    vllm_topk_ids = torch.empty(M,
-                                topk,
-                                dtype=torch.int32,
-                                device=hidden_states.device)
-    vllm_token_expert_indicies = torch.empty(M,
-                                             topk,
-                                             dtype=torch.int32,
-                                             device=hidden_states.device)
+    topk_weights = torch.empty(M,
+                               topk,
+                               dtype=torch.float32,
+                               device=hidden_states.device)
+    topk_ids = torch.empty(M,
+                           topk,
+                           dtype=torch.int32,
+                           device=hidden_states.device)
+    token_expert_indicies = torch.empty(M,
+                                        topk,
+                                        dtype=torch.int32,
+                                        device=hidden_states.device)
 
-    topk_weights = torch.empty(
-        M,
-        # topk,
-        E,
-        # dtype=torch.float32,
-        dtype=torch.float16,
-        device=hidden_states.device)
-    topk_ids = torch.empty(
-        M,
-        # topk,
-        E,
-        dtype=torch.int32,
-        device=hidden_states.device)
-
-    # vanilla
-    ## shape: [m, e]
-    with profile(record_shapes=True) as prof:
-        with record_function("torch_route"):
-            score = hidden_states @ gate
-            norm = torch.softmax(score, dim=-1)
-            tmp_topk_weights, tmp_topk_ids = torch.topk(norm, topk)
-            tmp_topk_ids = tmp_topk_ids.to(torch.int32)
-            if renormalize:
-                tmp_topk_weights = tmp_topk_weights / tmp_topk_weights.sum(
-                    dim=-1, keepdim=True)
-
-        # print('ref: ')
-        # print(tmp_topk_weights, tmp_topk_ids)
-        # print(tmp_topk_weights.dtype, tmp_topk_ids.dtype, tmp_topk_weights.shape,
-        #       tmp_topk_ids.shape)
-        # print(score)
-        # print(norm)
-        # print()
-        # print()
-
-        # vllm: GEMM + fused softmax + topk
-        with record_function("vllm"):
-            gating_output = hidden_states @ gate
-            moe_kernels.topk_softmax(
-                vllm_topk_weights,
-                vllm_topk_ids,
-                vllm_token_expert_indicies,
-                gating_output.float(),  # TODO(woosuk): Optimize this.
-            )
-            del vllm_token_expert_indicies  # Not used. Will be used in the future.
-            if renormalize:
-                vllm_topk_weights = vllm_topk_weights / vllm_topk_weights.sum(
-                    dim=-1, keepdim=True)
-            # print('vllm: ', vllm_topk_weights, vllm_topk_ids)
-
-        # tl.dot doesn't support tile size < 16; but gate can be padded statically
-        K, E = gate.shape
-        if E < 16:
-            diff = 16 - E
-            padd_gate = torch.cat(
-                [gate, torch.zeros((K, diff), dtype=gate.dtype)], 1)
-        else:
-            padd_gate = gate
-
-        # invoke to auto-tune
-        fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
-                    renormalize)
-
-        # fused routing
-        with record_function("fused_route"):
-
-            # print(id(topk_weights), id(topk_ids))
-            topk_weights, topk_ids = fused_route(hidden_states, padd_gate,
-                                                 topk, topk_weights, topk_ids,
-                                                 renormalize)
-
-            # print(topk_weights.shape, topk_ids.shape)
-            # print(id(topk_weights), id(topk_ids))
-
-        assert torch.allclose(tmp_topk_weights, topk_weights, atol=1e-2)
-        assert torch.allclose(
-            tmp_topk_ids,
-            topk_ids,
-        )
-
-        # print('OK')
-        # print('fused route: ', topk_weights, topk_ids)
+    # vllm: GEMM + fused softmax + topk
+    gating_output = hidden_states @ gate
+    moe_kernels.topk_softmax(
+        topk_weights,
+        topk_ids,
+        token_expert_indicies,
+        gating_output.float(),  # TODO(woosuk): Optimize this.
+    )
+    del token_expert_indicies  # Not used. Will be used in the future.
+    if renormalize:
+        topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
+    # print('vllm: ', topk_weights, topk_ids)
 
     #
     #
