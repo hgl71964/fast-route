@@ -1,3 +1,4 @@
-vllm
+vllm== 0.4.0.post1
 
+# torch==2.1.2
 # triton 3.0.0
