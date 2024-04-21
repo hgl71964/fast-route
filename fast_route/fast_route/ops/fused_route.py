@@ -5,7 +5,7 @@ import triton
 import triton.language as tl
 from triton.language.math import fdiv
 
-from argsort import argsort
+from fast_route.ops.argsort import argsort
 
 
 # yapf: disable
