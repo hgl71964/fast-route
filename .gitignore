@@ -2,3 +2,6 @@
 venv/
 .vscode/
 __pycache__
+data/
+
+*.egg-info/
