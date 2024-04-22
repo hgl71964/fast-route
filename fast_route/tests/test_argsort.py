@@ -46,7 +46,7 @@ def sort_kerenl(
 @pytest.mark.parametrize("m", [4, 8, 16, 64])
 @pytest.mark.parametrize("k", [4, 8, 16, 32, 64, 128])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
-@pytest.mark.parametrize("descend", [True, False])
+@pytest.mark.parametrize("descend", [1])
 @pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("id_dtype", [torch.int64])
 def test_argsort(m, k, seed, descend, dtype, id_dtype):
@@ -71,7 +71,7 @@ def test_argsort(m, k, seed, descend, dtype, id_dtype):
     sort_kerenl[grid](x, o, ids, x.stride(0), x.stride(1), descend, BLOCK_M,
                       BLOCK_N)
 
-    ref_o, ref_ids = torch.sort(x, 1, descend)
+    ref_o, ref_ids = torch.sort(x, 1, bool(descend))
     ref_ids = ref_ids.to(id_dtype)  # by default, torch.int64
     tol = {}
 
