@@ -48,7 +48,7 @@ def sort_kerenl(
 @pytest.mark.parametrize("seed", [i for i in range(10)])
 @pytest.mark.parametrize("descend", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
-@pytest.mark.parametrize("id_dtype", [torch.int64])
+@pytest.mark.parametrize("id_dtype", [torch.int64, torch.int32])
 def test_argsort(m, k, seed, descend, dtype, id_dtype):
     torch.manual_seed(seed)
 
@@ -59,7 +59,6 @@ def test_argsort(m, k, seed, descend, dtype, id_dtype):
     )
     o = torch.empty_like(x)
     ids = torch.empty(x.shape, dtype=id_dtype, device='cuda')
-    # ids = torch.empty(x.shape, dtype=dtype, device='cuda')
 
     BLOCK_M = 2
     BLOCK_N = k  # must fit in
@@ -76,9 +75,11 @@ def test_argsort(m, k, seed, descend, dtype, id_dtype):
                                 dim=1,
                                 descending=bool(descend),
                                 stable=True)
-    ref_ids = ref_ids.to(id_dtype)  # by default, torch.int64
     tol = {}
 
     # compare
     torch.testing.assert_close(o, ref_o, **tol)
+
+    ids = ids.to(id_dtype)
+    ref_ids = ref_ids.to(id_dtype)  # by default, torch.int64
     torch.testing.assert_close(ids, ref_ids, **tol)
