@@ -291,8 +291,10 @@ def fused_moe(
     del token_expert_indicies  # Not used. Will be used in the future.
     if renormalize:
         topk_weights = topk_weights / topk_weights.sum(dim=-1, keepdim=True)
-    # print('vllm: ', topk_weights, topk_ids)
 
+    # print('vllm: ')
+    # print(topk_weights)
+    # print(topk_ids)
     #
     #
     #

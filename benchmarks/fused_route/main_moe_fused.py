@@ -306,7 +306,10 @@ def fused_moe(hidden_states: torch.Tensor,
         with ctx_pt:
             score = hidden_states @ gate
             norm = torch.softmax(score, dim=-1)
+
+            # NOTE that torch.topk's tie breaking is stochastic...
             tmp_topk_weights, tmp_topk_ids = torch.topk(norm, topk)
+
             tmp_topk_ids = tmp_topk_ids.to(torch.int32)
             if renormalize:
                 tmp_topk_weights = tmp_topk_weights / tmp_topk_weights.sum(
@@ -351,8 +354,8 @@ def fused_moe(hidden_states: torch.Tensor,
                 M,
                 # topk,
                 E,
-                # dtype=torch.float32,
-                dtype=torch.float16,
+                dtype=torch.float32,
+                # dtype=torch.float16,
                 device=hidden_states.device)
             topk_ids = torch.empty(
                 M,
@@ -364,20 +367,6 @@ def fused_moe(hidden_states: torch.Tensor,
             # invoke to auto-tune and autotune
             fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
                         renormalize)
-
-            topk_weights = torch.empty(
-                M,
-                # topk,
-                E,
-                # dtype=torch.float32,
-                dtype=torch.float16,
-                device=hidden_states.device)
-            topk_ids = torch.empty(
-                M,
-                # topk,
-                E,
-                dtype=torch.int32,
-                device=hidden_states.device)
 
         # fused routing
         # with record_function("fused_route"):
@@ -393,10 +382,10 @@ def fused_moe(hidden_states: torch.Tensor,
 
         assert torch.allclose(tmp_topk_weights, topk_weights,
                               atol=1e-2), (tmp_topk_weights, topk_weights)
-        assert torch.allclose(
-            tmp_topk_ids,
-            topk_ids,
-        ), (tmp_topk_ids, topk_ids)
+
+        assert torch.allclose(vllm_topk_weights,
+                              topk_weights.to(torch.float32),
+                              atol=1e-2), (vllm_topk_weights, topk_weights)
 
     if profile:
         save_path = os.path.join('./data',

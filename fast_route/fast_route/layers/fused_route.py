@@ -295,8 +295,8 @@ def fused_moe(
     # NOTE the first time invoke will cause JIT and autotune
     topk_weights, topk_ids = fused_route(hidden_states, padd_gate, topk,
                                          topk_weights, topk_ids, renormalize)
-    #
-    #
+
+    topk_weights = topk_weights.to(torch.float32)
     #
     #
     # fused moe op

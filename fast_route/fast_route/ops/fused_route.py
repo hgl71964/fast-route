@@ -81,7 +81,10 @@ def renormalize_route(
         b_ptrs += BLOCK_SIZE_K * stride_bk
     # You can fuse arbitrary activation functions here
     # while the accumulator is still in FP32!
-    x = accumulator.to(tl.float16)
+
+    # XXX convert to fp16?
+    # x = accumulator.to(tl.float16)
+    x = accumulator
 
     ## debug
     # ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
