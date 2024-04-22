@@ -380,7 +380,8 @@ def fused_moe(hidden_states: torch.Tensor,
             # print(topk_weights.shape, topk_ids.shape)
             # print(id(topk_weights), id(topk_ids))
 
-        assert torch.allclose(tmp_topk_weights, topk_weights,
+        assert torch.allclose(tmp_topk_weights,
+                              topk_weights.to(tmp_topk_weights.dtype),
                               atol=1e-2), (tmp_topk_weights, topk_weights)
 
         assert torch.allclose(vllm_topk_weights, topk_weights,
