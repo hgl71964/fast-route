@@ -273,8 +273,8 @@ def fused_moe(
         M,
         # topk,
         E,
-        # dtype=torch.float32,
-        dtype=torch.float16,
+        dtype=torch.float32,
+        # dtype=torch.float16,
         device=hidden_states.device)
     topk_ids = torch.empty(
         M,
@@ -296,7 +296,7 @@ def fused_moe(
     topk_weights, topk_ids = fused_route(hidden_states, padd_gate, topk,
                                          topk_weights, topk_ids, renormalize)
 
-    topk_weights = topk_weights.to(torch.float32)
+    # topk_weights = topk_weights.to(torch.float32)
     #
     #
     # fused moe op

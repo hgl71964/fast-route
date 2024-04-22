@@ -383,9 +383,16 @@ def fused_moe(hidden_states: torch.Tensor,
         assert torch.allclose(tmp_topk_weights, topk_weights,
                               atol=1e-2), (tmp_topk_weights, topk_weights)
 
-        assert torch.allclose(vllm_topk_weights,
-                              topk_weights.to(torch.float32),
+        assert torch.allclose(vllm_topk_weights, topk_weights,
                               atol=1e-2), (vllm_topk_weights, topk_weights)
+
+        assert torch.allclose(
+            vllm_topk_ids,
+            topk_ids,
+        ), (
+            vllm_topk_ids,
+            topk_ids,
+        )
 
     if profile:
         save_path = os.path.join('./data',
