@@ -285,20 +285,6 @@ def fused_moe(hidden_states: torch.Tensor,
                                              dtype=torch.int32,
                                              device=hidden_states.device)
 
-    topk_weights = torch.empty(
-        M,
-        # topk,
-        E,
-        # dtype=torch.float32,
-        dtype=torch.float16,
-        device=hidden_states.device)
-    topk_ids = torch.empty(
-        M,
-        # topk,
-        E,
-        dtype=torch.int32,
-        device=hidden_states.device)
-
     # vanilla
     ## shape: [m, e]
     if profile:
@@ -361,9 +347,37 @@ def fused_moe(hidden_states: torch.Tensor,
             else:
                 padd_gate = gate
 
+            topk_weights = torch.empty(
+                M,
+                # topk,
+                E,
+                # dtype=torch.float32,
+                dtype=torch.float16,
+                device=hidden_states.device)
+            topk_ids = torch.empty(
+                M,
+                # topk,
+                E,
+                dtype=torch.int32,
+                device=hidden_states.device)
+
             # invoke to auto-tune and autotune
             fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
                         renormalize)
+
+            topk_weights = torch.empty(
+                M,
+                # topk,
+                E,
+                # dtype=torch.float32,
+                dtype=torch.float16,
+                device=hidden_states.device)
+            topk_ids = torch.empty(
+                M,
+                # topk,
+                E,
+                dtype=torch.int32,
+                device=hidden_states.device)
 
         # fused routing
         # with record_function("fused_route"):

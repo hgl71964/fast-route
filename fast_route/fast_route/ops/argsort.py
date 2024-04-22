@@ -27,19 +27,23 @@ def _compare_and_swap(x, ids, flip, i: core.constexpr, n_dims: core.constexpr):
     right_idx = core.reshape(right_idx, x.shape)
 
     # actual compare-and-swap
+    cond = (left > right) ^ flip
     idtype = core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth,
                                 signed=True)
+
     ileft = left.to(idtype, bitcast=True)
     iright = right.to(idtype, bitcast=True)
     ix = x.to(idtype, bitcast=True)
-
-    cond = (left > right) ^ flip
-
     ret = ix ^ core.where(cond, ileft ^ iright, zeros_like(ix))
 
-    new_ids = ids ^ core.where(cond, left_idx ^ right_idx, zeros_like(ids))
+    idtype = core.get_int_dtype(bitwidth=ids.dtype.primitive_bitwidth,
+                                signed=True)
+    ileft_idx = left_idx.to(idtype, bitcast=True)
+    iright_idx = right_idx.to(idtype, bitcast=True)
+    iids = ids.to(idtype, bitcast=True)
+    new_ids = iids ^ core.where(cond, ileft_idx ^ iright_idx, zeros_like(iids))
 
-    return ret.to(x.dtype, bitcast=True), new_ids
+    return ret.to(x.dtype, bitcast=True), new_ids.to(ids.dtype, bitcast=True)
 
 
 @triton.jit
