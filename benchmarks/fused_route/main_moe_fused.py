@@ -383,7 +383,7 @@ def fused_moe(hidden_states: torch.Tensor,
         )
 
     if profile:
-        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+        save_path = os.path.join('./data',
                                  f"route_perf_{M}_{K}_{E}_{N}_{topk}.json")
         prof.export_chrome_trace(save_path)
     #

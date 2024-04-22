@@ -222,14 +222,15 @@ def invoke_fused_moe_kernel(A: torch.Tensor, B: torch.Tensor, C: torch.Tensor,
     )
 
 
-def fused_moe(hidden_states: torch.Tensor,
-              gate,
-              w1: torch.Tensor,
-              w2: torch.Tensor,
-              topk,
-              renormalize=True,
-              inplace=False,
-              save=False):
+def fused_moe(
+    hidden_states: torch.Tensor,
+    gate,
+    w1: torch.Tensor,
+    w2: torch.Tensor,
+    topk,
+    renormalize=True,
+    inplace=False,
+):
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of weights, w1 and w2, and top-k gating mechanism.
 
@@ -291,6 +292,7 @@ def fused_moe(hidden_states: torch.Tensor,
     else:
         padd_gate = gate
 
+    # NOTE the first time invoke will cause JIT and autotune
     topk_weights, topk_ids = fused_route(hidden_states, padd_gate, topk,
                                          topk_weights, topk_ids, renormalize)
     #
