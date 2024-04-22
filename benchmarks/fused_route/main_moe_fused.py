@@ -304,11 +304,13 @@ def fused_moe(hidden_states: torch.Tensor,
         profile_ctx = torch.profiler.profile(record_shapes=True)
         ctx_pt = record_function("torch_route")
         ctx_vllm = record_function("vllm")
+        ctx_prep = record_function("prep")
         ctx_fr = record_function("fused_route")
     else:
         profile_ctx = nullcontext()
         ctx_pt = nullcontext()
         ctx_vllm = nullcontext()
+        ctx_prep = nullcontext()
         ctx_fr = nullcontext()
 
     with profile_ctx as prof:
@@ -349,17 +351,18 @@ def fused_moe(hidden_states: torch.Tensor,
             # print('vllm: ', vllm_topk_weights, vllm_topk_ids)
 
         # tl.dot doesn't support tile size < 16; but gate can be padded statically
-        K, E = gate.shape
-        if E < 16:
-            diff = 16 - E
-            padd_gate = torch.cat(
-                [gate, torch.zeros((K, diff), dtype=gate.dtype)], 1)
-        else:
-            padd_gate = gate
+        with ctx_prep:
+            K, E = gate.shape
+            if E < 16:
+                diff = 16 - E
+                padd_gate = torch.cat(
+                    [gate, torch.zeros((K, diff), dtype=gate.dtype)], 1)
+            else:
+                padd_gate = gate
 
-        # invoke to auto-tune
-        fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
-                    renormalize)
+            # invoke to auto-tune and autotune
+            fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
+                        renormalize)
 
         # fused routing
         # with record_function("fused_route"):
