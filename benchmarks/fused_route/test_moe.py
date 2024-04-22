@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import sys, os
+import argparse
 
 sys.path.append(os.getcwd())
 
@@ -17,6 +18,12 @@ import time
 from torch.profiler import profile, record_function, ProfilerActivity
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="???")
+    parser.add_argument('-p', action='store_true', help='A boolean flag')
+    return parser.parse_args()
+
+
 def run_moe(
     m: int,
     n: int,
@@ -24,6 +31,7 @@ def run_moe(
     e: int,
     topk: int,
     dtype: torch.dtype,
+    args,
 ):
     torch.cuda.manual_seed(3227)
 
@@ -32,7 +40,14 @@ def run_moe(
     w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
 
-    ref_out = fused_moe(a, gate, w1, w2, topk, True, False)
+    ref_out = fused_moe(a,
+                        gate,
+                        w1,
+                        w2,
+                        topk,
+                        renormalize=True,
+                        inplace=False,
+                        profile=args.p)
 
 
 if __name__ == '__main__':
@@ -42,4 +57,5 @@ if __name__ == '__main__':
     e = 16
     # e = 8
     topk = 2
-    run_moe(m, n, k, e, topk, torch.float16)
+
+    run_moe(m, n, k, e, topk, torch.float16, parse_args())

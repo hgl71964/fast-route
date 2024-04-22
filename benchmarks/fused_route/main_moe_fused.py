@@ -5,6 +5,7 @@
 # LICENSE file in the root directory of this source tree.
 
 import sys, os
+from contextlib import nullcontext
 """Fused MoE kernel."""
 import torch
 import triton
@@ -14,7 +15,7 @@ import vllm._moe_C as moe_kernels
 
 from fused_route import fused_route
 
-from torch.profiler import profile, record_function, ProfilerActivity
+from torch.profiler import record_function, ProfilerActivity
 
 
 @triton.jit
@@ -231,7 +232,7 @@ def fused_moe(hidden_states: torch.Tensor,
               topk,
               renormalize=True,
               inplace=False,
-              save=False):
+              profile=False):
     """
     This function computes a Mixture of Experts (MoE) layer using two sets of weights, w1 and w2, and top-k gating mechanism.
 
@@ -299,8 +300,21 @@ def fused_moe(hidden_states: torch.Tensor,
 
     # vanilla
     ## shape: [m, e]
-    with profile(record_shapes=True) as prof:
-        with record_function("torch_route"):
+    if profile:
+        profile_ctx = torch.profiler.profile(record_shapes=True)
+        ctx_pt = record_function("torch_route")
+        ctx_vllm = record_function("vllm")
+        ctx_fr = record_function("fused_route")
+    else:
+        profile_ctx = nullcontext()
+        ctx_pt = nullcontext()
+        ctx_vllm = nullcontext()
+        ctx_fr = nullcontext()
+
+    with profile_ctx as prof:
+
+        # with record_function("torch_route"):
+        with ctx_pt:
             score = hidden_states @ gate
             norm = torch.softmax(score, dim=-1)
             tmp_topk_weights, tmp_topk_ids = torch.topk(norm, topk)
@@ -319,7 +333,8 @@ def fused_moe(hidden_states: torch.Tensor,
         # print()
 
         # vllm: GEMM + fused softmax + topk
-        with record_function("vllm"):
+        # with record_function("vllm"):
+        with ctx_vllm:
             gating_output = hidden_states @ gate
             moe_kernels.topk_softmax(
                 vllm_topk_weights,
@@ -347,7 +362,8 @@ def fused_moe(hidden_states: torch.Tensor,
                     renormalize)
 
         # fused routing
-        with record_function("fused_route"):
+        # with record_function("fused_route"):
+        with ctx_fr:
 
             # print(id(topk_weights), id(topk_ids))
             topk_weights, topk_ids = fused_route(hidden_states, padd_gate,
@@ -363,9 +379,10 @@ def fused_moe(hidden_states: torch.Tensor,
             topk_ids,
         )
 
-        # print('OK')
-        # print('fused route: ', topk_weights, topk_ids)
-
+    if profile:
+        save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 f"route_perf_{M}_{K}_{E}_{N}_{topk}.json")
+        prof.export_chrome_trace(save_path)
     #
     #
     #
