@@ -43,11 +43,11 @@ def sort_kerenl(
     tl.store(id_ptrs, ids)
 
 
-@pytest.mark.parametrize("m", [4, 8, 16, 64])
+@pytest.mark.parametrize("m", [2, 8, 16, 64])
 @pytest.mark.parametrize("k", [4, 8, 16, 32, 64, 128])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
-@pytest.mark.parametrize("descend", [1])
-@pytest.mark.parametrize("dtype", [torch.float16])
+@pytest.mark.parametrize("descend", [0, 1])
+@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
 @pytest.mark.parametrize("id_dtype", [torch.int64])
 def test_argsort(m, k, seed, descend, dtype, id_dtype):
     torch.manual_seed(seed)
@@ -68,10 +68,14 @@ def test_argsort(m, k, seed, descend, dtype, id_dtype):
         triton.cdiv(x.shape[1], BLOCK_N),
     )
 
-    sort_kerenl[grid](x, o, ids, x.stride(0), x.stride(1), descend, BLOCK_M,
-                      BLOCK_N)
+    sort_kerenl[grid](x, o, ids, x.stride(0), x.stride(1), int(descend),
+                      BLOCK_M, BLOCK_N)
 
-    ref_o, ref_ids = torch.sort(x, 1, bool(descend))
+    # NOTE: torch.sort must set stable = True
+    ref_o, ref_ids = torch.sort(x,
+                                dim=1,
+                                descending=bool(descend),
+                                stable=True)
     ref_ids = ref_ids.to(id_dtype)  # by default, torch.int64
     tol = {}
 

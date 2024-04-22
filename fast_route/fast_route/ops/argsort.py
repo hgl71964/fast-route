@@ -8,7 +8,8 @@ from triton.language.standard import _log2, sum, zeros_like
 
 
 @triton.jit
-def _compare_and_swap(x, ids, flip, i: core.constexpr, n_dims: core.constexpr):
+def _compare_and_swap(x, ids, flip, i: core.constexpr, n_dims: core.constexpr,
+                      descending: core.constexpr):
     n_outer: core.constexpr = x.numel >> n_dims
     shape: core.constexpr = [n_outer * 2**i, 2, 2**(n_dims - i - 1)]
     y = core.reshape(x, shape)
@@ -27,28 +28,43 @@ def _compare_and_swap(x, ids, flip, i: core.constexpr, n_dims: core.constexpr):
     right_idx = core.reshape(right_idx, x.shape)
 
     # actual compare-and-swap
-    cond = (left > right) ^ flip
     idtype = core.get_int_dtype(bitwidth=x.dtype.primitive_bitwidth,
                                 signed=True)
-
     ileft = left.to(idtype, bitcast=True)
     iright = right.to(idtype, bitcast=True)
     ix = x.to(idtype, bitcast=True)
+
+    # NOTE this tries to replicate torch.sort(stable=True)
+    cond = (left > right) ^ flip
+
+    eq_mask = ileft == iright
+
+    # clear the bit where eq
+    cond = cond & (~eq_mask)
+
+    # reset the bit where eq
+    if descending == 1:
+        idx_mask = (left_idx < right_idx) ^ flip
+    elif descending == 0:
+        idx_mask = (left_idx > right_idx) ^ flip
+    cond = cond | (eq_mask & idx_mask)
+
     ret = ix ^ core.where(cond, ileft ^ iright, zeros_like(ix))
 
-    idtype = core.get_int_dtype(bitwidth=ids.dtype.primitive_bitwidth,
-                                signed=True)
-    ileft_idx = left_idx.to(idtype, bitcast=True)
-    iright_idx = right_idx.to(idtype, bitcast=True)
-    iids = ids.to(idtype, bitcast=True)
-    new_ids = iids ^ core.where(cond, ileft_idx ^ iright_idx, zeros_like(iids))
+    new_ids = ids ^ core.where(cond, left_idx ^ right_idx, zeros_like(ids))
 
-    return ret.to(x.dtype, bitcast=True), new_ids.to(ids.dtype, bitcast=True)
+    return ret.to(x.dtype, bitcast=True), new_ids
 
 
 @triton.jit
-def _bitonic_merge(x, ids, stage: core.constexpr, order: core.constexpr,
-                   n_dims: core.constexpr):
+def _bitonic_merge(
+    x,
+    ids,
+    stage: core.constexpr,
+    order: core.constexpr,
+    n_dims: core.constexpr,
+    descending: core.constexpr,
+):
     '''
     order_type 0 == ascending
     order_type 1 == descending
@@ -72,7 +88,8 @@ def _bitonic_merge(x, ids, stage: core.constexpr, order: core.constexpr,
         flip = order
     # perform `stage` rounds of `compare-and-swap`
     for i in core.static_range(stage):
-        x, ids = _compare_and_swap(x, ids, flip, i + (n_dims - stage), n_dims)
+        x, ids = _compare_and_swap(x, ids, flip, i + (n_dims - stage), n_dims,
+                                   descending)
     return x, ids
 
 
@@ -90,7 +107,7 @@ def argsort(x,
 
     for i in core.static_range(1, n_dims + 1):
         x, ids = _bitonic_merge(x, ids, i, 2 if i < n_dims else descending,
-                                n_dims)
+                                n_dims, descending)
     return x, ids
 
 
@@ -176,7 +193,7 @@ if __name__ == '__main__':
     print(ids)
 
     # ref_o, ref_ids = torch.sort(x, 1, True)
-    ref_o, ref_ids = torch.sort(x, 1, False)
+    ref_o, ref_ids = torch.sort(x, 1, False, stable=True)  #
     print('ref: ')
     print(ref_o)
     print(ref_ids)
