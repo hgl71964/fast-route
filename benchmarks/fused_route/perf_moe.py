@@ -27,7 +27,7 @@ from fast_route.layers.vllm_route import fused_moe as vllm_route
         styles=[('blue', '-'), ('green', '-')],
         ylabel="TFLOPS",  # Label name for the y-axis
         plot_name=
-        "test",  # Name for the plot, used also as a file name for saving the plot.
+        "moe_bench",  # Name for the plot, used also as a file name for saving the plot.
         args={},
     ))
 def benchmark(m, provider):
@@ -38,7 +38,7 @@ def benchmark(m, provider):
     e = 8
     topk = 2
 
-    torch.cuda.manual_seed(3227)
+    # torch.cuda.manual_seed(3227)
     dtype = torch.float16
 
     a = torch.randn((m, k), device='cuda', dtype=dtype) / 10
@@ -60,4 +60,4 @@ def benchmark(m, provider):
 
 
 if __name__ == '__main__':
-    benchmark.run(show_plots=True, print_data=True, save_path='data')
+    benchmark.run(show_plots=True, print_data=True, save_path='./data')

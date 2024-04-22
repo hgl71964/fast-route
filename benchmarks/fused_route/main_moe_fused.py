@@ -13,7 +13,8 @@ import triton.language as tl
 from vllm._C import ops
 import vllm._moe_C as moe_kernels
 
-from fused_route import fused_route
+# from fused_route import fused_route
+from fast_route.ops.fused_route import fused_route
 
 from torch.profiler import record_function, ProfilerActivity
 
@@ -376,11 +377,12 @@ def fused_moe(hidden_states: torch.Tensor,
             # print(topk_weights.shape, topk_ids.shape)
             # print(id(topk_weights), id(topk_ids))
 
-        assert torch.allclose(tmp_topk_weights, topk_weights, atol=1e-2)
+        assert torch.allclose(tmp_topk_weights, topk_weights,
+                              atol=1e-2), (tmp_topk_weights, topk_weights)
         assert torch.allclose(
             tmp_topk_ids,
             topk_ids,
-        )
+        ), (tmp_topk_ids, topk_ids)
 
     if profile:
         save_path = os.path.join('./data',
