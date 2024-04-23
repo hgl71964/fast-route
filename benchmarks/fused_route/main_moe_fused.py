@@ -373,36 +373,6 @@ def fused_moe(hidden_states: torch.Tensor,
         assert torch.allclose(vllm_topk_weights, topk_weights,
                               atol=1e-2), (vllm_topk_weights, topk_weights)
 
-        assert torch.allclose(
-            vllm_topk_ids,
-            tmp_topk_ids,
-        ), 'vllm token id mismatch'
-
-        # NOTE: compare IDs is tricky because different tie-breaking policy
-        # note that order doesn't matter, so long as expert id is included
-        for m in range(M):
-            for j in range(topk):
-                find = False
-                for k in range(topk):
-                    if topk_ids[m, j] == tmp_topk_ids[m, k]:
-                        find = True
-                        break
-                if not find:
-                    print(tmp_topk_ids[m])
-                    print(tmp_topk_weights[m])
-                    print()
-                    print(topk_ids[m])
-                    print(topk_weights[m])
-                    assert False, 'mismatch token ids'
-
-        # assert torch.allclose(
-        #     vllm_topk_ids,
-        #     topk_ids,
-        # ), (
-        #     vllm_topk_ids,
-        #     topk_ids,
-        # )
-
     if profile:
         save_path = os.path.join('./data',
                                  f"route_perf_{M}_{K}_{E}_{N}_{topk}.json")

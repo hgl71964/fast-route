@@ -15,10 +15,36 @@ from fast_route.layers.fused_route import fused_moe as fr_moe
 def parse_args():
     parser = argparse.ArgumentParser(description="???")
     parser.add_argument('-p', action='store_true', help='A boolean flag')
-    parser.add_argument('--seed',
-                        type=int,
-                        default=1337,
-                        help='A boolean flag')
+    parser.add_argument(
+        '-m',
+        type=int,
+        default=512,
+    )
+    parser.add_argument(
+        '-n',
+        type=int,
+        default=8192,
+    )
+    parser.add_argument(
+        '-k',
+        type=int,
+        default=4096,
+    )
+    parser.add_argument(
+        '-e',
+        type=int,
+        default=16,
+    )
+    parser.add_argument(
+        '--topk',
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=1337,
+    )
     return parser.parse_args()
 
 
@@ -47,15 +73,9 @@ def test_routing(
 
 
 if __name__ == '__main__':
-    m = 512
-    n = 14336 // 2
-    k = 4096
-    e = 16
-    # e = 8
-    topk = 2
-
     args = parse_args()
 
     torch.manual_seed(args.seed)
 
-    test_routing(m, n, k, e, topk, torch.float16, args)
+    test_routing(args.m, args.n, args.k, args.e, args.topk, torch.float16,
+                 args)

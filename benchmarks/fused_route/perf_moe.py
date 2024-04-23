@@ -1,14 +1,46 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-#
-# This source code is licensed under the BSD-style license found in the
-# LICENSE file in the root directory of this source tree.
+import argparse
 import torch
 import triton
 import time
 
 from fast_route.layers.fused_route import fused_moe as fused_route
 from fast_route.layers.vllm_route import fused_moe as vllm_route
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="???")
+    parser.add_argument('-p', action='store_true', help='A boolean flag')
+    parser.add_argument(
+        '-m',
+        type=int,
+        default=512,
+    )
+    parser.add_argument(
+        '-n',
+        type=int,
+        default=8192,
+    )
+    parser.add_argument(
+        '-k',
+        type=int,
+        default=4096,
+    )
+    parser.add_argument(
+        '-e',
+        type=int,
+        default=16,
+    )
+    parser.add_argument(
+        '--topk',
+        type=int,
+        default=2,
+    )
+    parser.add_argument(
+        '--seed',
+        type=int,
+        default=1337,
+    )
+    return parser.parse_args()
 
 
 @triton.testing.perf_report(
@@ -60,4 +92,13 @@ def benchmark(m, provider):
 
 
 if __name__ == '__main__':
+    args = parse_args()
+    m = args.m
+    n = args.n
+    k = args.k
+    e = args.e
+    topk = args.topk
+
+    torch.manual_seed(args.seed)
+
     benchmark.run(show_plots=True, print_data=True, save_path='./data')
