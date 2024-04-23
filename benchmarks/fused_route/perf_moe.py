@@ -105,4 +105,6 @@ if __name__ == '__main__':
         perf = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
         return perf(ms), perf(max_ms), perf(min_ms)
 
-    benchmark.run(show_plots=True, print_data=True, save_path='./data')
+    benchmark.run(show_plots=True,
+                  print_data=True,
+                  save_path=f'./data/{m}_{n}_{k}_{e}_{topk}')

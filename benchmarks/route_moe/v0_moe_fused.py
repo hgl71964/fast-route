@@ -250,7 +250,7 @@ def fused_moe(hidden_states: torch.Tensor,
     assert w1.is_contiguous(), "Expert weights1 must be contiguous"
     assert w2.is_contiguous(), "Expert weights2 must be contiguous"
     assert hidden_states.dtype in [torch.float16, torch.bfloat16]
-    M, _ = hidden_states.shape
+    M, K = hidden_states.shape
     E, N, _ = w1.shape
 
     config = {
@@ -300,12 +300,12 @@ def fused_moe(hidden_states: torch.Tensor,
 
             # vanilla
             ## shape: [m, e]
-            ## score = hidden_states@gate  
+            ## score = hidden_states@gate
             ## score = torch.softmax(score, dim=-1)
             ## topk_weights, topk_ids = torch.topk(score, topk)
 
             # vllm: GEMM + fused softmax + topk
-            gating_output = hidden_states@gate  
+            gating_output = hidden_states@gate
             moe_kernels.topk_softmax(
                 topk_weights,
                 topk_ids,
@@ -336,7 +336,8 @@ def fused_moe(hidden_states: torch.Tensor,
                                     config)
 
     # log
-    save_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), f"route_perf.json")
+    save_path = os.path.join('./data',
+                             f"moe_perf_{M}_{K}_{E}_{N}_{topk}.json")
     prof.export_chrome_trace(save_path)
 
     if inplace:
