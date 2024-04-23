@@ -56,7 +56,7 @@ if __name__ == '__main__':
     @triton.testing.perf_report(
         triton.testing.Benchmark(
             x_names=['m'],  # Argument names to use as an x-axis for the plot
-            x_vals=[2**i for i in range(0, 10)
+            x_vals=[2**i for i in range(0, 15)
                     ],  # Different possible values for `x_name`
             line_arg=
             'provider',  # Argument name whose value corresponds to a different line in the plot
