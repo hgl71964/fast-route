@@ -73,14 +73,12 @@ def fused_softmax_sort_kerenl(
     # shape: [BLOCK_M, BLOCK_N]
     x = tl.load(x_ptrs)
 
-    log2_e = 1.44269504
-
     x_max = tl.max(x, 1)  # [BLOCK_SIZE_M, ]
     x_max = x_max[:, None]
 
     # safe_exp = tl.exp(x-x_max)
+    log2_e = 1.44269504
     safe_exp = tl.exp2((x - x_max) * log2_e)  # the identity
-
     safe_exp_sum = tl.sum(safe_exp, 1)
     x = safe_exp / safe_exp_sum[:, None]
 
