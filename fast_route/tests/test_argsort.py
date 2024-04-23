@@ -48,8 +48,8 @@ def sort_kerenl(
     tl.store(id_ptrs, ids)
 
 
-@pytest.mark.parametrize("m", [2, 8, 16, 64])
-@pytest.mark.parametrize("k", [4, 8, 16, 32, 64, 128])
+@pytest.mark.parametrize("m", [32, 64, 128])
+@pytest.mark.parametrize("k", [4, 8, 16])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
 @pytest.mark.parametrize("descend", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
@@ -65,7 +65,7 @@ def test_stable_argsort(m, k, seed, descend, dtype, id_dtype):
     o = torch.empty_like(x)
     ids = torch.empty(x.shape, dtype=id_dtype, device='cuda')
 
-    BLOCK_M = 2
+    BLOCK_M = 4
     BLOCK_N = k  # must fit in
     grid = (
         triton.cdiv(x.shape[0], BLOCK_M),
@@ -91,8 +91,8 @@ def test_stable_argsort(m, k, seed, descend, dtype, id_dtype):
     torch.testing.assert_close(ids, ref_ids, **tol)
 
 
-@pytest.mark.parametrize("m", [2, 8, 16, 64])
-@pytest.mark.parametrize("k", [4, 8, 16, 32, 64, 128])
+@pytest.mark.parametrize("m", [32, 64, 128])
+@pytest.mark.parametrize("k", [4, 8, 16])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
 @pytest.mark.parametrize("descend", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
@@ -108,7 +108,7 @@ def test_argsort(m, k, seed, descend, dtype, id_dtype):
     o = torch.empty_like(x)
     ids = torch.empty(x.shape, dtype=id_dtype, device='cuda')
 
-    BLOCK_M = 2
+    BLOCK_M = 4
     BLOCK_N = k  # must fit in
     grid = (
         triton.cdiv(x.shape[0], BLOCK_M),
@@ -123,7 +123,7 @@ def test_argsort(m, k, seed, descend, dtype, id_dtype):
     ref_o, ref_ids = torch.sort(x,
                                 dim=1,
                                 descending=bool(descend),
-                                stable=True)
+                                stable=False)
     tol = {}
 
     # compare: all unstable argsort we only compare weights

@@ -40,13 +40,12 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     # ref_topk_weights, ref_topk_ids = ref_topk_weights.to('cuda'), ref_topk_ids.to('cuda')
 
     ## stable sort
-    ref_topk_weights, ref_topk_ids = torch.sort(norm,
-                                                dim=1,
-                                                descending=True,
-                                                stable=True)
-    ref_topk_weights, ref_topk_ids = ref_topk_weights[:, :
-                                                      topk], ref_topk_ids[:, :
-                                                                          topk]
+    full_weights, full_topk_ids = torch.sort(norm,
+                                             dim=1,
+                                             descending=True,
+                                             stable=True)
+    ref_topk_weights = full_weights[:, :topk]
+    ref_topk_ids = full_topk_ids[:, :topk]
 
     # pytest.set_trace()    # invoke PDB debugger and tracing
 
@@ -81,7 +80,7 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     else:
         padd_gate = gate
 
-    topk_weights, topk_ids, intermediate = fused_route_test(
+    topk_weights, topk_ids, softmax_norm, fr_full_weights = fused_route_test(
         hidden_states,
         padd_gate,
         topk,
@@ -96,7 +95,8 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
 
     # compare
     # pytest.set_trace()
-    torch.testing.assert_close(norm, intermediate, **tol)
+    torch.testing.assert_close(norm, softmax_norm, **tol)
+    torch.testing.assert_close(full_weights, fr_full_weights, **tol)
     # torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
     torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
 

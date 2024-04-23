@@ -173,7 +173,7 @@ def fused_route(hidden_state: torch.Tensor,
 def route_kernel_test(
         # Pointers to matrices
         a_ptr, b_ptr, c_ptr, d_ptr,
-        intermediate_ptr,
+        intermediate_ptr, full_weights_ptr,
         # Matrix dimensions
         M, N, K,
         # The stride variables represent how much to increase the ptr by when moving by 1
@@ -192,9 +192,7 @@ def route_kernel_test(
     pid_m = tl.program_id(axis=0)
 
     # ----------------------------------------------------------
-    # offs_am = (pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)) % M
     offs_am = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    # offs_bn = (pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)) % N
     offs_bn = tl.arange(0, BLOCK_SIZE_N)
     offs_k = tl.arange(0, BLOCK_SIZE_K)
     a_ptrs = a_ptr + (offs_am[:, None] * stride_am +
@@ -205,15 +203,12 @@ def route_kernel_test(
     # -----------------------------------------------------------
     accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
     for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
-        # Load the next block of A and B, generate a mask by checking the K dimension.
-        # If it is out of bounds, set it to 0.
         a = tl.load(a_ptrs,
                     mask=offs_k[None, :] < K - k * BLOCK_SIZE_K,
                     other=0.0)
         b = tl.load(b_ptrs,
                     mask=offs_k[:, None] < K - k * BLOCK_SIZE_K,
                     other=0.0)
-        # We accumulate along the K dimension.
         accumulator = tl.dot(a, b, accumulator)
         # Advance the ptrs to the next K block.
         a_ptrs += BLOCK_SIZE_K * stride_ak
@@ -256,10 +251,14 @@ def route_kernel_test(
                                          None] + stride_cn * offs_cn[None, :]
     intermediate_ptrs = intermediate_ptr + stride_cm * offs_cm[:,
                                          None] + stride_cn * offs_cn[None, :]
+    full_weights_ptrs = full_weights_ptr + stride_cm * offs_cm[:,
+                                         None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
     tl.store(d_ptrs, sort_ids, mask=c_mask)
     tl.store(intermediate_ptrs, intermediate, mask=c_mask)
+    tl.store(full_weights_ptrs, sort, mask=c_mask)
+
 
 
 def fused_route_test(hidden_state: torch.Tensor,
@@ -285,10 +284,11 @@ def fused_route_test(hidden_state: torch.Tensor,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
 
-    intermediate = torch.empty_like(topk_weights)
+    softmax_intermediate = torch.empty_like(topk_weights)
+    full_weights = torch.empty_like(topk_weights)
 
     route_kernel_test[grid](
-        hidden_state, gate, topk_weights, topk_ids, intermediate,
+        hidden_state, gate, topk_weights, topk_ids, softmax_intermediate, full_weights,
         M, N, K,
         hidden_state.stride(0), hidden_state.stride(1),
         gate.stride(0), gate.stride(1),
@@ -307,4 +307,4 @@ def fused_route_test(hidden_state: torch.Tensor,
     # print(topk_weights.shape, topk_ids.shape)
     # print()
     # print()
-    return topk_weights, topk_ids, intermediate
+    return topk_weights, topk_ids, softmax_intermediate, full_weights
