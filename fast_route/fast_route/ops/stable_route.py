@@ -179,18 +179,17 @@ def test_route_kernel(
     # x = accumulator.to(tl.float16)
     x = accumulator
 
-    ## debug
-    # ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
+    # 1. softmax
     # x_max = tl.max(x, 1)  # [BLOCK_SIZE_M, ]
     # safe_exp = tl.exp(x-x_max[:, None])
     # safe_exp_sum = tl.sum(safe_exp, 1)
-    # c = safe_exp / safe_exp_sum[:, None]
+    # x = safe_exp / safe_exp_sum[:, None]  # TODO try fast math div
 
-    # topk/sort
+    # 2. topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    sort, sort_ids = argsort(x, ids, 1, True)
+    sort, sort_ids = argsort(x, ids, 1, 1)
 
-    # persistent softmax
+    # 3. renormalize
     mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
     mask = tl.broadcast_to(mask[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
     topk_sort = tl.where(mask, sort, -float('inf'))
