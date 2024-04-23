@@ -3,7 +3,7 @@ import triton
 import triton.language as tl
 from triton.language.math import fdiv
 
-from fast_route.ops.stable_argsort import argsort
+from fast_route.ops.stable_argsort import argsort as stable_argsort
 
 
 # yapf: disable
@@ -93,7 +93,7 @@ def route_kernel(
 
     # topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    sort, sort_ids = argsort(x, ids, 1, True)
+    sort, sort_ids = stable_argsort(x, ids, 1, True)
 
     # persistent softmax
     mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
@@ -118,6 +118,51 @@ def route_kernel(
     tl.store(c_ptrs, c, mask=c_mask)
     tl.store(d_ptrs, sort_ids, mask=c_mask)
 
+def fused_route(hidden_state: torch.Tensor,
+                gate: torch.Tensor,
+                topk: int,
+                topk_weights: torch.Tensor,
+                topk_ids: torch.Tensor,
+                renormalize=True,
+            ):
+    assert renormalize, f'only support renormalize now'
+
+    M, K = hidden_state.shape  # e.g. 512, 4096
+    KK, N = gate.shape         # e.g. 4096, 8
+    assert KK == K, f'{KK}, {K}'
+    assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
+    assert N >= 16, f'{N} number of experts must be > 16'
+
+    config = {
+        # 'BLOCK_SIZE_M': 16,
+        # 'BLOCK_SIZE_K': 32,
+        'BLOCK_SIZE_N': N,   # entire col fit in
+        'TOPK': topk,
+    }
+    grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
+
+    route_kernel[grid](
+        hidden_state, gate, topk_weights, topk_ids,
+        M, N, K,
+        hidden_state.stride(0), hidden_state.stride(1),
+        gate.stride(0), gate.stride(1),
+        topk_weights.stride(0), topk_weights.stride(1),
+        **config,
+    )
+
+    # tl cannot directly write to ptr with incompetible shape
+    topk_weights = topk_weights[:, :topk]
+    topk_ids = topk_ids[:, :topk]
+
+    # print('fused_route:')
+    # print(topk_weights)
+    # print(topk_ids)
+    # print(topk_weights.shape, topk_ids.shape)
+    # print()
+    # print()
+    return topk_weights, topk_ids
+
+
 @triton.autotune(
     configs=[
         triton.Config({'BLOCK_SIZE_M': 128,  'BLOCK_SIZE_K': 64,}, num_stages=3, num_warps=8),
@@ -125,9 +170,10 @@ def route_kernel(
     key=['M', 'N', 'K'],
 )
 @triton.jit
-def test_route_kernel(
+def route_kernel_test(
         # Pointers to matrices
         a_ptr, b_ptr, c_ptr, d_ptr,
+        intermediate_ptr,
         # Matrix dimensions
         M, N, K,
         # The stride variables represent how much to increase the ptr by when moving by 1
@@ -180,14 +226,14 @@ def test_route_kernel(
     x = accumulator
 
     # 1. softmax
-    # x_max = tl.max(x, 1)  # [BLOCK_SIZE_M, ]
-    # safe_exp = tl.exp(x-x_max[:, None])
-    # safe_exp_sum = tl.sum(safe_exp, 1)
-    # x = safe_exp / safe_exp_sum[:, None]  # TODO try fast math div
+    x_max = tl.max(x, 1)  # [BLOCK_SIZE_M, ]
+    safe_exp = tl.exp(x-x_max[:, None])
+    safe_exp_sum = tl.sum(safe_exp, 1)
+    intermediate = safe_exp / safe_exp_sum[:, None]  # TODO try fast math div
 
     # 2. topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    sort, sort_ids = argsort(x, ids, 1, 1)
+    sort, sort_ids = stable_argsort(intermediate, ids, 1, 1)
 
     # 3. renormalize
     mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
@@ -208,18 +254,20 @@ def test_route_kernel(
                                          None] + stride_cn * offs_cn[None, :]
     d_ptrs = d_ptr + stride_cm * offs_cm[:,
                                          None] + stride_cn * offs_cn[None, :]
+    intermediate_ptrs = intermediate_ptr + stride_cm * offs_cm[:,
+                                         None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
     tl.store(c_ptrs, c, mask=c_mask)
     tl.store(d_ptrs, sort_ids, mask=c_mask)
+    tl.store(intermediate_ptrs, intermediate, mask=c_mask)
 
 
-def fused_route(hidden_state: torch.Tensor,
+def fused_route_test(hidden_state: torch.Tensor,
                 gate: torch.Tensor,
                 topk: int,
                 topk_weights: torch.Tensor,
                 topk_ids: torch.Tensor,
                 renormalize=True,
-                testing=False,
             ):
     assert renormalize, f'only support renormalize now'
 
@@ -236,24 +284,17 @@ def fused_route(hidden_state: torch.Tensor,
         'TOPK': topk,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
-    if testing:
-        test_route_kernel[grid](
-            hidden_state, gate, topk_weights, topk_ids,
-            M, N, K,
-            hidden_state.stride(0), hidden_state.stride(1),
-            gate.stride(0), gate.stride(1),
-            topk_weights.stride(0), topk_weights.stride(1),
-            **config,
-        )
-    else:
-        route_kernel[grid](
-            hidden_state, gate, topk_weights, topk_ids,
-            M, N, K,
-            hidden_state.stride(0), hidden_state.stride(1),
-            gate.stride(0), gate.stride(1),
-            topk_weights.stride(0), topk_weights.stride(1),
-            **config,
-        )
+
+    intermediate = torch.empty_like(topk_weights)
+
+    route_kernel_test[grid](
+        hidden_state, gate, topk_weights, topk_ids, intermediate,
+        M, N, K,
+        hidden_state.stride(0), hidden_state.stride(1),
+        gate.stride(0), gate.stride(1),
+        topk_weights.stride(0), topk_weights.stride(1),
+        **config,
+    )
 
     # tl cannot directly write to ptr with incompetible shape
     topk_weights = topk_weights[:, :topk]
@@ -266,4 +307,4 @@ def fused_route(hidden_state: torch.Tensor,
     # print(topk_weights.shape, topk_ids.shape)
     # print()
     # print()
-    return topk_weights, topk_ids
+    return topk_weights, topk_ids, intermediate

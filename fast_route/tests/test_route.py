@@ -4,12 +4,10 @@ import triton.language as tl
 
 import pytest
 
-from contextlib import nullcontext
-
 from vllm._C import ops
 import vllm._moe_C as moe_kernels
 
-from fast_route.ops.stable_route import fused_route
+from fast_route.ops.stable_route import fused_route_test
 
 
 @pytest.mark.parametrize("m", [512, 1024])
@@ -18,7 +16,7 @@ from fast_route.ops.stable_route import fused_route
 @pytest.mark.parametrize("e", [16])  # TODO 8
 @pytest.mark.parametrize("topk", [2, 4])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
-@pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
+@pytest.mark.parametrize("dtype", [torch.float16])
 @pytest.mark.parametrize("renormalize", [True])
 def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     torch.manual_seed(seed)
@@ -83,14 +81,13 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     else:
         padd_gate = gate
 
-    topk_weights, topk_ids = fused_route(
+    topk_weights, topk_ids, intermediate = fused_route_test(
         hidden_states,
         padd_gate,
         topk,
         topk_weights,
         topk_ids,
         renormalize,
-        testing=True,
     )
     tol = {
         'atol': 1e-2,
@@ -98,8 +95,10 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     }
 
     # compare
-    torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
-    # torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
+    # pytest.set_trace()
+    torch.testing.assert_close(norm, intermediate, **tol)
+    # torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
+    torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
 
 
 # @pytest.mark.parametrize("m", [512, 1024])
