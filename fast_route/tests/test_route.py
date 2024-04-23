@@ -76,7 +76,7 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     else:
         padd_gate = gate
 
-    topk_weights, topk_ids, softmax_norm, fr_full_weights = fused_route_test(
+    topk_weights, topk_ids, softmax_norm, fr_full_weights, fr_full_ids = fused_route_test(
         hidden_states,
         padd_gate,
         topk,
@@ -92,9 +92,10 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     # compare
     # pytest.set_trace()
     torch.testing.assert_close(norm, softmax_norm, **tol)
-    # torch.testing.assert_close(full_weights, fr_full_weights, **tol)
+    torch.testing.assert_close(full_weights, fr_full_weights, **tol)
+    torch.testing.assert_close(full_ids, fr_full_ids, **tol)
 
-    torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
+    # torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
     # torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
 
     # torch.testing.assert_close(full_ids, topk_ids.to(torch.int64), **tol)

@@ -228,7 +228,7 @@ def route_kernel_test(
 
     # 2. topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    sort, sort_ids = stable_argsort(x, ids, 1, 1)
+    sort, sort_ids = stable_argsort(intermediate, ids, 1, 1)
 
     # 3. renormalize
     mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
@@ -241,9 +241,7 @@ def route_kernel_test(
 
     # -----------------------------------------------------------
     offs_cm = pid_m * BLOCK_SIZE_M + tl.arange(0, BLOCK_SIZE_M)
-    # offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     offs_cn = tl.arange(0, BLOCK_SIZE_N)
-    # offs_cn = tl.arange(0, TOPK)
 
     c_ptrs = c_ptr + stride_cm * offs_cm[:,
                                          None] + stride_cn * offs_cn[None, :]
@@ -297,6 +295,7 @@ def fused_route_test(hidden_state: torch.Tensor,
     )
 
     # tl cannot directly write to ptr with incompetible shape
+    full_ids = topk_ids.clone()
     topk_weights = topk_weights[:, :topk]
     topk_ids = topk_ids[:, :topk]
 
@@ -306,4 +305,4 @@ def fused_route_test(hidden_state: torch.Tensor,
     # print(topk_weights.shape, topk_ids.shape)
     # print()
     # print()
-    return topk_weights, topk_ids, softmax_intermediate, full_weights
+    return topk_weights, topk_ids, softmax_intermediate, full_weights, full_ids
