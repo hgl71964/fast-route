@@ -53,7 +53,6 @@ def fused_moe(
             'GROUP_SIZE_M': 1
         }
 
-    # NOTE: statically allocate route parameter
     topk_weights = torch.empty(
         M,
         E,
@@ -65,22 +64,10 @@ def fused_moe(
                            dtype=torch.int32,
                            device=hidden_states.device)
 
-    # tl.dot doesn't support tile size < 16; but gate can be padded statically
-    K, E = gate.shape
-    if E < 16:
-        diff = 16 - E
-        padd_gate = torch.cat(
-            [gate, torch.zeros((K, diff), dtype=gate.dtype)], 1)
-    else:
-        padd_gate = gate
-
     # NOTE the first time invoke will cause JIT and autotune
-    topk_weights, topk_ids = fused_route(hidden_states, padd_gate, topk,
+    topk_weights, topk_ids = fused_route(hidden_states, gate, topk,
                                          topk_weights, topk_ids, renormalize)
-
     # topk_weights = topk_weights.to(torch.float32)
-    #
-    #
     # fused moe op
     intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
                                       device=hidden_states.device,

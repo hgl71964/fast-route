@@ -255,22 +255,6 @@ def fused_moe(hidden_states: torch.Tensor,
     M, _ = hidden_states.shape
     E, N, _ = w1.shape
 
-    config = {
-        'BLOCK_SIZE_M': 64,
-        'BLOCK_SIZE_N': 64,
-        'BLOCK_SIZE_K': 32,
-        'GROUP_SIZE_M': 8
-    }
-
-    # if topk_ids.numel() <= w1.shape[0]:
-    if M * topk <= w1.shape[0]:
-        config = {
-            'BLOCK_SIZE_M': 16,
-            'BLOCK_SIZE_N': 32,
-            'BLOCK_SIZE_K': 64,
-            'GROUP_SIZE_M': 1
-        }
-
     # NOTE: statically allocate route parameter
     vllm_topk_weights = torch.empty(M,
                                     topk,
@@ -352,16 +336,7 @@ def fused_moe(hidden_states: torch.Tensor,
                     dim=-1, keepdim=True)
             # print('vllm: ', vllm_topk_weights, vllm_topk_ids)
 
-        # tl.dot doesn't support tile size < 16; but gate can be padded statically
         with ctx_prep:
-            K, E = gate.shape
-            if E < 16:
-                diff = 16 - E
-                padd_gate = torch.cat(
-                    [gate, torch.zeros((K, diff), dtype=gate.dtype)], 1)
-            else:
-                padd_gate = gate
-
             topk_weights = torch.empty(
                 M,
                 # topk,
@@ -377,7 +352,7 @@ def fused_moe(hidden_states: torch.Tensor,
                 device=hidden_states.device)
 
             # invoke to auto-tune and autotune
-            fused_route(hidden_states, padd_gate, topk, topk_weights, topk_ids,
+            fused_route(hidden_states, gate, topk, topk_weights, topk_ids,
                         renormalize)
 
         # fused routing
@@ -385,8 +360,8 @@ def fused_moe(hidden_states: torch.Tensor,
         with ctx_fr:
 
             # print(id(topk_weights), id(topk_ids))
-            topk_weights, topk_ids = fused_route(hidden_states, padd_gate,
-                                                 topk, topk_weights, topk_ids,
+            topk_weights, topk_ids = fused_route(hidden_states, gate, topk,
+                                                 topk_weights, topk_ids,
                                                  renormalize)
 
             # print(topk_weights.shape, topk_ids.shape)
@@ -433,39 +408,3 @@ def fused_moe(hidden_states: torch.Tensor,
         save_path = os.path.join('./data',
                                  f"route_perf_{M}_{K}_{E}_{N}_{topk}.json")
         prof.export_chrome_trace(save_path)
-    #
-    #
-    #
-    #
-    # fused moe op
-    # intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
-    #                                   device=hidden_states.device,
-    #                                   dtype=hidden_states.dtype)
-    # intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N // 2),
-    #                                   device=hidden_states.device,
-    #                                   dtype=hidden_states.dtype)
-    # intermediate_cache3 = torch.empty((M, topk_ids.shape[1], w2.shape[1]),
-    #                                   device=hidden_states.device,
-    #                                   dtype=hidden_states.dtype)
-
-    # sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-    #     topk_ids, config['BLOCK_SIZE_M'], E)
-
-    # invoke_fused_moe_kernel(hidden_states, w1, intermediate_cache1,
-    #                         topk_weights, topk_ids, sorted_token_ids,
-    #                         expert_ids, num_tokens_post_padded, False,
-    #                         topk_ids.shape[1], config)
-
-    # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
-
-    # invoke_fused_moe_kernel(intermediate_cache2, w2, intermediate_cache3,
-    #                         topk_weights, topk_ids, sorted_token_ids,
-    #                         expert_ids, num_tokens_post_padded, True, 1,
-    #                         config)
-
-    # if inplace:
-    #     return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-    #                      dim=1,
-    #                      out=hidden_states)
-    # return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-    #                  dim=1)

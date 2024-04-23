@@ -43,6 +43,7 @@ def route_kernel(
         stride_cm, stride_cn,  #
         # Meta-parameters
         TOPK: tl.constexpr,
+        DIFF: tl.constexpr,
         BLOCK_SIZE_M: tl.constexpr,
         BLOCK_SIZE_N: tl.constexpr,
         BLOCK_SIZE_K: tl.constexpr,  #
@@ -81,7 +82,8 @@ def route_kernel(
     # while the accumulator is still in FP32!
 
     # XXX convert to fp16? may have precision issue
-    x = accumulator.to(tl.float16)
+    # x = accumulator.to(tl.float16)
+    x = accumulator
 
     ## debug
     # ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
@@ -89,6 +91,11 @@ def route_kernel(
     # safe_exp = tl.exp(x-x_max[:, None])
     # safe_exp_sum = tl.sum(safe_exp, 1)
     # c = safe_exp / safe_exp_sum[:, None]
+
+    if DIFF != 0:
+        pad_mask = tl.arange(0, BLOCK_SIZE_N) > BLOCK_SIZE_N-DIFF
+        pad_mask = tl.broadcast_to(pad_mask[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
+        x = tl.where(pad_mask, x, -float('inf'))
 
     # topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
@@ -127,21 +134,34 @@ def fused_route(hidden_state: torch.Tensor,
     assert renormalize, f'only support renormalize now'
 
     M, K = hidden_state.shape  # e.g. 512, 4096
-    KK, N = gate.shape         # e.g. 4096, 8
-    assert KK == K, f'{KK}, {K}'
+    _, N = gate.shape         # e.g. 4096, 8
     assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
-    assert N >= 16, f'{N} number of experts must be > 16'
+    # assert N >= 16, f'{N} number of experts must be > 16'
+
+    # tl.dot doesn't support tile size < 16; but gate can be padded statically
+    _, E = gate.shape
+    if E < 16:
+        DIFF = 16 - E
+        padd_gate = torch.cat([
+            gate,
+            torch.zeros((K, DIFF), dtype=gate.dtype, device=gate.device)
+            # torch.full((K, diff), -float('inf'), dtype=gate.dtype, device=gate.device)
+        ], 1)
+    else:
+        DIFF = 0
+        padd_gate = gate
 
     config = {
         # 'BLOCK_SIZE_M': 16,
         # 'BLOCK_SIZE_K': 32,
-        'BLOCK_SIZE_N': N,   # entire col fit in
+        'BLOCK_SIZE_N': max(N, 16),   # entire col fit in
         'TOPK': topk,
+        'DIFF': DIFF,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
 
     route_kernel[grid](
-        hidden_state, gate, topk_weights, topk_ids,
+        hidden_state, padd_gate, topk_weights, topk_ids,
         M, N, K,
         hidden_state.stride(0), hidden_state.stride(1),
         gate.stride(0), gate.stride(1),

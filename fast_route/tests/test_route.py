@@ -12,7 +12,7 @@ from fast_route.ops.stable_route import fused_route
 @pytest.mark.parametrize("m", [128, 512, 1024])
 @pytest.mark.parametrize("k", [4096])
 @pytest.mark.parametrize("n", [8196])
-@pytest.mark.parametrize("e", [16])  # TODO 8
+@pytest.mark.parametrize("e", [16])
 @pytest.mark.parametrize("topk", [2, 4])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
 @pytest.mark.parametrize("dtype", [torch.float16])
@@ -32,20 +32,9 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
                            dtype=torch.int64,
                            device=hidden_states.device)
 
-    # invoke to auto-tune and autotune
-    K, E = gate.shape
-    if E < 16:
-        diff = 16 - E
-        padd_gate = torch.cat([
-            gate,
-            torch.zeros((K, diff), dtype=gate.dtype, device=gate.device)
-        ], 1)
-    else:
-        padd_gate = gate
-
     topk_weights, topk_ids = fused_route(
         hidden_states,
-        padd_gate,
+        gate,
         topk,
         topk_weights,
         topk_ids,
@@ -91,7 +80,7 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
 @pytest.mark.parametrize("m", [128, 512, 1024])
 @pytest.mark.parametrize("k", [4096])
 @pytest.mark.parametrize("n", [8196])
-@pytest.mark.parametrize("e", [16])
+@pytest.mark.parametrize("e", [16, 8])
 @pytest.mark.parametrize("topk", [2, 4])
 @pytest.mark.parametrize("seed", [i for i in range(10)])
 @pytest.mark.parametrize("dtype", [torch.float16])
