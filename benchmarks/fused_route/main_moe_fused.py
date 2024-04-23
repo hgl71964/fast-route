@@ -13,8 +13,7 @@ import triton.language as tl
 from vllm._C import ops
 import vllm._moe_C as moe_kernels
 
-# from fused_route import fused_route
-from fast_route.ops.fused_route import fused_route
+from fast_route.ops.stable_route import fused_route
 
 from torch.profiler import record_function, ProfilerActivity
 
@@ -252,7 +251,7 @@ def fused_moe(hidden_states: torch.Tensor,
     assert w1.is_contiguous(), "Expert weights1 must be contiguous"
     assert w2.is_contiguous(), "Expert weights2 must be contiguous"
     assert hidden_states.dtype in [torch.float16, torch.bfloat16]
-    M, _ = hidden_states.shape
+    M, K = hidden_states.shape
     E, N, _ = w1.shape
 
     # NOTE: statically allocate route parameter
