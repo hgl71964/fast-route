@@ -84,7 +84,7 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     # pytest.set_trace()
     torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
 
-    # NOTE: due to tie-break policy there's mismatch
+    # NOTE: due to tie-break policy there's mismatch, we have demo our tie-breaking policy in test_argsort.py
     # torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
 
 
