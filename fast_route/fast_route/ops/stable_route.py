@@ -85,17 +85,13 @@ def route_kernel(
     # x = accumulator.to(tl.float16)
     x = accumulator
 
-    ## debug
-    # ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    # x_max = tl.max(x, 1)  # [BLOCK_SIZE_M, ]
-    # safe_exp = tl.exp(x-x_max[:, None])
-    # safe_exp_sum = tl.sum(safe_exp, 1)
-    # c = safe_exp / safe_exp_sum[:, None]
-
-    if DIFF != 0:
-        pad_mask = tl.arange(0, BLOCK_SIZE_N) > BLOCK_SIZE_N-DIFF
-        pad_mask = tl.broadcast_to(pad_mask[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-        x = tl.where(pad_mask, x, -float('inf'))
+    # resolve pad (XXX: padding seems to deeply wrong here)
+    # it's likely a bug in triton; individual test ok
+    # for now do not have e < 16
+    pad_mask = tl.arange(0, BLOCK_SIZE_N) < BLOCK_SIZE_N-DIFF
+    pad_mask = tl.broadcast_to(pad_mask[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
+    minel = tl.broadcast_to(tl.min(x, 1)[:, None], (BLOCK_SIZE_M, BLOCK_SIZE_N))
+    x = tl.where(pad_mask, x, minel)
 
     # topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
