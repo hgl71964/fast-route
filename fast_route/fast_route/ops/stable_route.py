@@ -217,8 +217,8 @@ def route_kernel_test(
     # while the accumulator is still in FP32!
 
     # XXX convert to fp16?
-    # x = accumulator.to(tl.float16)
-    x = accumulator
+    x = accumulator.to(tl.float16)
+    # x = accumulator
 
     # 1. softmax
     x_max = tl.max(x, 1)  # [BLOCK_SIZE_M, ]
@@ -228,7 +228,7 @@ def route_kernel_test(
 
     # 2. topk/sort
     ids = tl.broadcast_to(tl.arange(0, BLOCK_SIZE_N)[None, :], (BLOCK_SIZE_M, BLOCK_SIZE_N))
-    sort, sort_ids = stable_argsort(intermediate, ids, 1, 1)
+    sort, sort_ids = stable_argsort(x, ids, 1, 1)
 
     # 3. renormalize
     mask = tl.arange(0, BLOCK_SIZE_N) - TOPK < 0
@@ -298,8 +298,7 @@ def fused_route_test(hidden_state: torch.Tensor,
 
     # tl cannot directly write to ptr with incompetible shape
     topk_weights = topk_weights[:, :topk]
-    # topk_ids = topk_ids[:, :topk]
-
+    topk_ids = topk_ids[:, :topk]
 
     # print('fused_route:')
     # print(topk_weights)

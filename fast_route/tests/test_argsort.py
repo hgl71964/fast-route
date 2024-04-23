@@ -54,7 +54,8 @@ def sort_kerenl(
 @pytest.mark.parametrize("descend", [0, 1])
 @pytest.mark.parametrize("dtype", [torch.float16, torch.float32])
 @pytest.mark.parametrize("id_dtype", [torch.int64, torch.int32])
-def test_stable_argsort(m, k, seed, descend, dtype, id_dtype):
+@pytest.mark.parametrize("softmax", [True, False])
+def test_stable_argsort(m, k, seed, descend, dtype, id_dtype, softmax):
     torch.manual_seed(seed)
 
     x = torch.randn(
@@ -62,6 +63,9 @@ def test_stable_argsort(m, k, seed, descend, dtype, id_dtype):
         dtype=dtype,
         device='cuda',
     )
+    if softmax:
+        x = torch.softmax(x, dim=-1)
+
     o = torch.empty_like(x)
     ids = torch.empty(x.shape, dtype=id_dtype, device='cuda')
 
