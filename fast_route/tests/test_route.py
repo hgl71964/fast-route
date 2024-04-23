@@ -10,7 +10,7 @@ import vllm._moe_C as moe_kernels
 from fast_route.ops.stable_route import fused_route_test
 
 
-@pytest.mark.parametrize("m", [512, 1024])
+@pytest.mark.parametrize("m", [128, 512, 1024])
 @pytest.mark.parametrize("k", [4096])
 @pytest.mark.parametrize("n", [8196])
 @pytest.mark.parametrize("e", [16])  # TODO 8
@@ -40,16 +40,13 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     # ref_topk_weights, ref_topk_ids = ref_topk_weights.to('cuda'), ref_topk_ids.to('cuda')
 
     ## stable sort
-    full_weights, full_topk_ids = torch.sort(norm,
-                                             dim=1,
-                                             descending=True,
-                                             stable=True)
+    full_weights, full_ids = torch.sort(norm,
+                                        dim=1,
+                                        descending=True,
+                                        stable=True)
     ref_topk_weights = full_weights[:, :topk]
-    ref_topk_ids = full_topk_ids[:, :topk]
+    ref_topk_ids = full_ids[:, :topk]
 
-    # pytest.set_trace()    # invoke PDB debugger and tracing
-
-    ref_topk_ids = ref_topk_ids.to(torch.int32)
     if renormalize:
         ref_topk_weights = ref_topk_weights / ref_topk_weights.sum(
             dim=-1, keepdim=True)
@@ -66,7 +63,7 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
         M,
         # topk,
         E,
-        dtype=torch.int32,
+        dtype=torch.int64,
         device=hidden_states.device)
 
     # invoke to auto-tune and autotune
@@ -97,8 +94,11 @@ def test_stable_route(m, k, e, n, topk, seed, renormalize, dtype):
     # pytest.set_trace()
     torch.testing.assert_close(norm, softmax_norm, **tol)
     torch.testing.assert_close(full_weights, fr_full_weights, **tol)
-    # torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
-    torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
+
+    torch.testing.assert_close(ref_topk_weights, topk_weights, **tol)
+    # torch.testing.assert_close(ref_topk_ids, topk_ids, **tol)
+
+    # torch.testing.assert_close(full_ids, topk_ids.to(torch.int64), **tol)
 
 
 # @pytest.mark.parametrize("m", [512, 1024])

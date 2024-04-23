@@ -271,15 +271,15 @@ def fused_route_test(hidden_state: torch.Tensor,
     assert renormalize, f'only support renormalize now'
 
     M, K = hidden_state.shape  # e.g. 512, 4096
-    KK, N = gate.shape         # e.g. 4096, 8
+    KK, E = gate.shape         # e.g. 4096, 8
     assert KK == K, f'{KK}, {K}'
-    assert N <= 128, f'{N} number of experts should be small enough to reside in shared memory'
-    assert N >= 16, f'{N} number of experts must be > 16'
+    assert E <= 128, f'{E} number of experts should be small enough to reside in shared memory'
+    assert E >= 16, f'{E} number of experts must be > 16'
 
     config = {
         # 'BLOCK_SIZE_M': 16,
         # 'BLOCK_SIZE_K': 32,
-        'BLOCK_SIZE_N': N,   # entire col fit in
+        'BLOCK_SIZE_N': E,   # entire col fit in
         'TOPK': topk,
     }
     grid = lambda META: (triton.cdiv(M, META['BLOCK_SIZE_M']), )
@@ -289,7 +289,7 @@ def fused_route_test(hidden_state: torch.Tensor,
 
     route_kernel_test[grid](
         hidden_state, gate, topk_weights, topk_ids, softmax_intermediate, full_weights,
-        M, N, K,
+        M, E, K,
         hidden_state.stride(0), hidden_state.stride(1),
         gate.stride(0), gate.stride(1),
         topk_weights.stride(0), topk_weights.stride(1),
@@ -298,7 +298,7 @@ def fused_route_test(hidden_state: torch.Tensor,
 
     # tl cannot directly write to ptr with incompetible shape
     topk_weights = topk_weights[:, :topk]
-    topk_ids = topk_ids[:, :topk]
+    # topk_ids = topk_ids[:, :topk]
 
 
     # print('fused_route:')
