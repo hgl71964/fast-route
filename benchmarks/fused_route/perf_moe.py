@@ -94,7 +94,7 @@ if __name__ == '__main__':
         w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
 
         quantiles = [0.5, 0.2, 0.8]
-        if provider == 'gl':
+        if provider == 'fr':
             ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: fused_route(a, gate, w1, w2, topk, True, False),
                 quantiles=quantiles)
