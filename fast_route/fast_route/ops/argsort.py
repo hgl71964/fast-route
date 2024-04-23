@@ -37,18 +37,6 @@ def _compare_and_swap(x, ids, flip, i: core.constexpr, n_dims: core.constexpr,
     # NOTE this tries to replicate torch.sort(stable=True)
     cond = (left > right) ^ flip
 
-    eq_mask = ileft == iright
-
-    # clear the bit where eq
-    cond = cond & (~eq_mask)
-
-    # reset the bit where eq
-    if descending == 1:
-        idx_mask = (left_idx < right_idx) ^ flip
-    elif descending == 0:
-        idx_mask = (left_idx > right_idx) ^ flip
-    cond = cond | (eq_mask & idx_mask)
-
     ret = ix ^ core.where(cond, ileft ^ iright, zeros_like(ix))
 
     new_ids = ids ^ core.where(cond, left_idx ^ right_idx, zeros_like(ids))
@@ -98,6 +86,9 @@ def argsort(x,
             ids,
             dim: core.constexpr = None,
             descending: core.constexpr = core.CONSTEXPR_0):
+    '''
+    this op aims to align with torch.sort(..., stable=True)
+    '''
     # handle default dimension or check that it is the most minor dim
     _dim: core.constexpr = len(x.shape) - 1 if dim is None else dim
     core.static_assert(_dim == len(x.shape) - 1,

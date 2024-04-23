@@ -308,7 +308,19 @@ def fused_moe(hidden_states: torch.Tensor,
             norm = torch.softmax(score, dim=-1)
 
             # NOTE that torch.topk's tie breaking is stochastic...
-            tmp_topk_weights, tmp_topk_ids = torch.topk(norm, topk)
+            # so we use torch.sort(stable=True) to create comparable results
+            # tmp_topk_weights, tmp_topk_ids = torch.topk(norm, topk)
+
+            # tmp_topk_weights, tmp_topk_ids = torch.sort(norm,
+            #                             dim=1,
+            #                             descending=True,
+            #                             stable=True)
+            # tmp_topk_weights, tmp_topk_ids = tmp_topk_weights[:, :topk], tmp_topk_ids[:, :topk]
+
+            tmp_topk_weights, tmp_topk_ids = torch.topk(
+                norm.float().cpu(), topk)
+            tmp_topk_weights, tmp_topk_ids = tmp_topk_weights.to(
+                'cuda'), tmp_topk_ids.to('cuda')
 
             tmp_topk_ids = tmp_topk_ids.to(torch.int32)
             if renormalize:
@@ -389,11 +401,33 @@ def fused_moe(hidden_states: torch.Tensor,
 
         assert torch.allclose(
             vllm_topk_ids,
-            topk_ids,
-        ), (
-            vllm_topk_ids,
-            topk_ids,
-        )
+            tmp_topk_ids,
+        ), 'vllm token id mismatch'
+
+        # NOTE: compare IDs is tricky because different tie-breaking policy
+        # note that order doesn't matter, so long as expert id is included
+        for m in range(M):
+            for j in range(topk):
+                find = False
+                for k in range(topk):
+                    if topk_ids[m, j] == tmp_topk_ids[m, k]:
+                        find = True
+                        break
+                if not find:
+                    print(tmp_topk_ids[m])
+                    print(tmp_topk_weights[m])
+                    print()
+                    print(topk_ids[m])
+                    print(topk_weights[m])
+                    assert False, 'mismatch token ids'
+
+        # assert torch.allclose(
+        #     vllm_topk_ids,
+        #     topk_ids,
+        # ), (
+        #     vllm_topk_ids,
+        #     topk_ids,
+        # )
 
     if profile:
         save_path = os.path.join('./data',
@@ -404,34 +438,34 @@ def fused_moe(hidden_states: torch.Tensor,
     #
     #
     # fused moe op
-    intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
-    intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N // 2),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
-    intermediate_cache3 = torch.empty((M, topk_ids.shape[1], w2.shape[1]),
-                                      device=hidden_states.device,
-                                      dtype=hidden_states.dtype)
+    # intermediate_cache1 = torch.empty((M, topk_ids.shape[1], N),
+    #                                   device=hidden_states.device,
+    #                                   dtype=hidden_states.dtype)
+    # intermediate_cache2 = torch.empty((M * topk_ids.shape[1], N // 2),
+    #                                   device=hidden_states.device,
+    #                                   dtype=hidden_states.dtype)
+    # intermediate_cache3 = torch.empty((M, topk_ids.shape[1], w2.shape[1]),
+    #                                   device=hidden_states.device,
+    #                                   dtype=hidden_states.dtype)
 
-    sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
-        topk_ids, config['BLOCK_SIZE_M'], E)
+    # sorted_token_ids, expert_ids, num_tokens_post_padded = moe_align_block_size(
+    #     topk_ids, config['BLOCK_SIZE_M'], E)
 
-    invoke_fused_moe_kernel(hidden_states, w1, intermediate_cache1,
-                            topk_weights, topk_ids, sorted_token_ids,
-                            expert_ids, num_tokens_post_padded, False,
-                            topk_ids.shape[1], config)
+    # invoke_fused_moe_kernel(hidden_states, w1, intermediate_cache1,
+    #                         topk_weights, topk_ids, sorted_token_ids,
+    #                         expert_ids, num_tokens_post_padded, False,
+    #                         topk_ids.shape[1], config)
 
-    ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
+    # ops.silu_and_mul(intermediate_cache2, intermediate_cache1.view(-1, N))
 
-    invoke_fused_moe_kernel(intermediate_cache2, w2, intermediate_cache3,
-                            topk_weights, topk_ids, sorted_token_ids,
-                            expert_ids, num_tokens_post_padded, True, 1,
-                            config)
+    # invoke_fused_moe_kernel(intermediate_cache2, w2, intermediate_cache3,
+    #                         topk_weights, topk_ids, sorted_token_ids,
+    #                         expert_ids, num_tokens_post_padded, True, 1,
+    #                         config)
 
-    if inplace:
-        return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-                         dim=1,
-                         out=hidden_states)
-    return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
-                     dim=1)
+    # if inplace:
+    #     return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
+    #                      dim=1,
+    #                      out=hidden_states)
+    # return torch.sum(intermediate_cache3.view(*intermediate_cache3.shape),
+    #                  dim=1)

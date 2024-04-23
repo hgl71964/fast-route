@@ -12,7 +12,7 @@ import triton.language as tl
 from vllm._C import ops
 import vllm._moe_C as moe_kernels
 
-from fast_route.ops.fused_route import fused_route
+from fast_route.ops.stable_route import fused_route
 
 
 @triton.jit
