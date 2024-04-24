@@ -9,12 +9,14 @@ import triton
 from main_moe_fused import fused_moe as test_moe
 
 from fast_route.layers.vllm_route import fused_moe as vllm_moe
+from fast_route.layers.profile_vllm_route import fused_moe as profile_vllm_moe
+
 from fast_route.layers.fused_route import fused_moe as fr_moe
+from fast_route.layers.profile_fused_route import fused_moe as profile_fr_moe
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="???")
-    parser.add_argument('-p', action='store_true', help='A boolean flag')
     parser.add_argument(
         '-m',
         type=int,
@@ -62,14 +64,45 @@ def test_routing(
     w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
 
-    _ = test_moe(a,
-                 gate,
-                 w1,
-                 w2,
-                 topk,
-                 renormalize=True,
-                 inplace=False,
-                 profile=args.p)
+    # trigger JIT and autotune
+    fr_moe(
+        a,
+        gate,
+        w1,
+        w2,
+        topk,
+        renormalize=True,
+        inplace=False,
+    )
+    profile_fr_moe(
+        a,
+        gate,
+        w1,
+        w2,
+        topk,
+        renormalize=True,
+        inplace=False,
+    )
+
+    # trigger JIT and autotune
+    vllm_moe(
+        a,
+        gate,
+        w1,
+        w2,
+        topk,
+        renormalize=True,
+        inplace=False,
+    )
+    profile_vllm_moe(
+        a,
+        gate,
+        w1,
+        w2,
+        topk,
+        renormalize=True,
+        inplace=False,
+    )
 
 
 if __name__ == '__main__':
