@@ -57,7 +57,7 @@ def parse_args():
         default=128,
     )
     parser.add_argument(
-        '--n_heads',
+        '--n_head',
         type=int,
         default=32,
     )
@@ -84,9 +84,9 @@ def test_routing(
     w1 = torch.randn((e, 2 * n, k), device='cuda', dtype=dtype) / 10
     w2 = torch.randn((e, k, n), device='cuda', dtype=dtype) / 10
 
-    attn = Attention(args)
-    attn(x, profile=False)  # warmup
-    attn(x, profile=True)  
+    attn = Attention(args, dtype).to('cuda')
+    attn(x, None, None, profile=False)  # warmup
+    attn(x, None, None, profile=True)  
 
     # trigger JIT and autotune
     fr_moe(
@@ -134,5 +134,5 @@ if __name__ == '__main__':
 
     torch.manual_seed(args.seed)
 
-    test_routing(args.m, args.n, args.k, args.e, args.topk, torch.float16,
+    test_routing(args.n, args.k, args.e, args.topk, torch.float16,
                  args)

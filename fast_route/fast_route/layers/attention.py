@@ -10,9 +10,45 @@ from torch.nn import functional as F
 from torch.profiler import record_function, ProfilerActivity
 
 
-class Attention(nn.Module):
+class FlashAttention(nn.Module):
 
     def __init__(self, config):
+        super().__init__()
+        from flash_attn.flash_attn_interface import flash_attn_qkvpacked_func as flash_attn_func
+
+        self.attn = flash_attn_func
+
+    def forward(self, x: Tensor, profile=False) -> Tensor:
+        if profile:
+            ctx = torch.profiler.profile(record_shapes=True)
+            ctx1 = record_function("attn_prep")
+            ctx2 = record_function("attn")
+            ctx3 = record_function("attn_epilogue")
+        else:
+            ctx = nullcontext()
+            ctx1 = nullcontext()
+            ctx2 = nullcontext()
+            ctx3 = nullcontext()
+
+        # TODO
+        qkv = torch.randn((BATCH, N_CTX, 3, H, D_HEAD),
+                          dtype=dtype,
+                          device=device,
+                          requires_grad=True)
+        flash_attn_func(qkv, causal=causal)
+
+        if profile:
+            save_path = os.path.join(
+                './data',
+                f"attn_{bsz}_{seqlen}_{k}_{self.n_head}_{self.head_dim}.json")
+            prof.export_chrome_trace(save_path)
+
+        return y
+
+
+class Attention(nn.Module):
+
+    def __init__(self, config, dtype):
         super().__init__()
         config.dim = config.k
         config.n_local_heads = config.n_head
@@ -22,8 +58,11 @@ class Attention(nn.Module):
         total_head_dim = (config.n_head +
                           2 * config.n_local_heads) * config.head_dim
         # key, query, value projections for all heads, but in a batch
-        self.wqkv = nn.Linear(config.dim, total_head_dim, bias=False)
-        self.wo = nn.Linear(config.dim, config.dim, bias=False)
+        self.wqkv = nn.Linear(config.dim,
+                              total_head_dim,
+                              bias=False,
+                              dtype=dtype)
+        self.wo = nn.Linear(config.dim, config.dim, bias=False, dtype=dtype)
         self.kv_cache = None
 
         self.n_head = config.n_head
@@ -45,6 +84,10 @@ class Attention(nn.Module):
                 mask: Tensor,
                 input_pos: Optional[Tensor] = None,
                 profile=False) -> Tensor:
+        '''
+        mask: [1, 1, q_seq_len, {k, v}_seq_len]
+        '''
+        # https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
         if profile:
             ctx = torch.profiler.profile(record_shapes=True)
             ctx1 = record_function("attn_prep")
@@ -58,7 +101,7 @@ class Attention(nn.Module):
 
         with ctx as prof:
             with ctx1:
-                bsz, seqlen, k = x.shape
+                bsz, seqlen, embed_dim = x.shape
 
                 kv_size = self.n_local_heads * self.head_dim
                 q, k, v = self.wqkv(x).split([self.dim, kv_size, kv_size],
@@ -88,7 +131,8 @@ class Attention(nn.Module):
                 y = F.scaled_dot_product_attention(q,
                                                    k,
                                                    v,
-                                                   attn_mask=mask,
+                                                   attn_mask=None,
+                                                   is_causal=True,
                                                    dropout_p=0.0)
 
             with ctx3:
@@ -99,7 +143,8 @@ class Attention(nn.Module):
         if profile:
             save_path = os.path.join(
                 './data',
-                f"attn_{bsz}_{seqlen}_{k}_{self.n_head}_{self.head_dim}.json")
+                f"attn_{bsz}_{seqlen}_{embed_dim}_{self.n_head}_{self.head_dim}.json"
+            )
             prof.export_chrome_trace(save_path)
 
         return y
