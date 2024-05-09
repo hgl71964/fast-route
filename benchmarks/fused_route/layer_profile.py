@@ -9,7 +9,7 @@ import triton
 from fast_route.layers.vllm_route import fused_moe as vllm_moe
 from fast_route.layers.profile_vllm_route import fused_moe as profile_vllm_moe
 
-from fast_route.layers.fused_route import fused_moe as fr_moe
+from fast_route.layers.stable_route import fused_moe as fr_moe
 from fast_route.layers.profile_fused_route import fused_moe as profile_fr_moe
 
 from fast_route.layers.attention import Attention

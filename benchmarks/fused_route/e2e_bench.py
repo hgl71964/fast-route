@@ -3,18 +3,13 @@ import torch
 import triton
 import time
 
-from fast_route.layers.fused_route import fused_moe as fused_route
+from fast_route.layers.stable_route import fused_moe as fused_route
 from fast_route.layers.vllm_route import fused_moe as vllm_route
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description="???")
     parser.add_argument('-p', action='store_true', help='A boolean flag')
-    parser.add_argument(
-        '-m',
-        type=int,
-        default=512,
-    )
     parser.add_argument(
         '-n',
         type=int,
@@ -45,7 +40,6 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    m = args.m
     n = args.n
     k = args.k
     e = args.e
@@ -107,4 +101,4 @@ if __name__ == '__main__':
 
     benchmark.run(show_plots=True,
                   print_data=True,
-                  save_path=f'./data/{m}_{n}_{k}_{e}_{topk}')
+                  save_path=f'./data/e2e_bench_{n}_{k}_{e}_{topk}')

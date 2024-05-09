@@ -11,11 +11,6 @@ def parse_args():
     parser = argparse.ArgumentParser(description="???")
     parser.add_argument('-p', action='store_true', help='A boolean flag')
     parser.add_argument(
-        '-m',
-        type=int,
-        default=512,
-    )
-    parser.add_argument(
         '-n',
         type=int,
         default=8192,
@@ -45,7 +40,6 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    m = args.m
     n = args.n
     k = args.k
     e = args.e
