@@ -122,7 +122,7 @@ if __name__ == '__main__':
             ms, min_ms, max_ms = triton.testing.do_bench(
                 lambda: vllm_route(hidden_states, gate, topk, topk_weights, topk_ids, token_expert_indicies, True),
                 quantiles=quantiles)
-        perf = lambda ms: 2 * m * n * k * 1e-12 / (ms * 1e-3)
+        perf = lambda ms: 2 * m * k * e * 1e-12 / (ms * 1e-3)
         return perf(ms), perf(max_ms), perf(min_ms)
 
     benchmark.run(show_plots=True,
