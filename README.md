@@ -10,5 +10,7 @@ pip install -e fast_route
 
 ## result
 
-[<img src="moe_bench.png">]
+MoE layer: (Quadro RTX8000)
+
+<img src="moe_bench.png">
 
