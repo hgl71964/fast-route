@@ -101,4 +101,4 @@ if __name__ == '__main__':
 
     benchmark.run(show_plots=True,
                   print_data=True,
-                  save_path=f'./data/e2e_bench_{n}_{k}_{e}_{topk}')
+                  save_path=f'./data/moe_bench_{n}_{k}_{e}_{topk}')
