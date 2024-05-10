@@ -65,9 +65,10 @@ def parse_args():
 
 def fused_route_transformer(attn, x, gate, w1, w2, topk, embed_dim):
     out = attn(x, None, None, profile=False) 
-    a = out.view(-1, embed_dim)
+    h = out + x
+    h = h.view(-1, embed_dim)
     moe_out = fr_moe(
-        a,
+        h,
         gate,
         w1,
         w2,
@@ -80,9 +81,10 @@ def fused_route_transformer(attn, x, gate, w1, w2, topk, embed_dim):
 
 def vllm_transformer(attn, x, gate, w1, w2, topk, embed_dim):
     out = attn(x, None, None, profile=False) 
-    a = out.view(-1, embed_dim)
+    h = out + x
+    h = h.view(-1, embed_dim)
     moe_out = vllm_moe(
-        a,
+        h,
         gate,
         w1,
         w2,
